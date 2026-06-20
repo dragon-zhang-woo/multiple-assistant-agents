@@ -34,6 +34,12 @@ def parse_args() -> argparse.Namespace:
         help="auto uses DashScope when configured, otherwise deterministic mock.",
     )
     parser.add_argument(
+        "--provider",
+        choices=["auto", "dashscope", "deepseek"],
+        default="auto",
+        help="LLM provider for real API mode. auto prefers DeepSeek when DEEPSEEK_API_KEY is set, then DashScope.",
+    )
+    parser.add_argument(
         "--output-dir",
         default="outputs",
         help="Directory for survey.md, mindmap.md, and run_log.json.",
@@ -55,6 +61,7 @@ def main() -> None:
         output_dir=Path(args.output_dir),
         memory_path=Path(args.memory_path),
         mock_mode=args.mock,
+        provider=args.provider,
     )
 
     print("\n=== AI Research Agent Team finished ===")

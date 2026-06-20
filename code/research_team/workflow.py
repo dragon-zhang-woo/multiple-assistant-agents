@@ -25,8 +25,9 @@ def run_research_workflow(
     output_dir: Path,
     memory_path: Path,
     mock_mode: str = "auto",
+    provider: str = "auto",
 ) -> ResearchState:
-    llm, llm_warnings = build_llm(mock_mode)
+    llm, llm_warnings = build_llm(mock_mode, provider)
     state: ResearchState = {
         "topic": topic,
         "max_papers": max_papers,

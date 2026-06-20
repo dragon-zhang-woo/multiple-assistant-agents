@@ -11,3 +11,14 @@ python -m venv .venv
 ```
 
 输出文件位于 `outputs/`，长期记忆位于 `data/long_term_memory.json`。
+
+## DeepSeek
+
+也可以使用 DeepSeek API key：
+
+```bash
+set DEEPSEEK_API_KEY=your_key_here
+.\.venv\Scripts\python code\main.py --provider deepseek --mock never --topic "近年来Agent Memory有哪些研究方向？"
+```
+
+默认 DeepSeek 模型为 `deepseek-v4-flash`，可用 `DEEPSEEK_MODEL` 覆盖。

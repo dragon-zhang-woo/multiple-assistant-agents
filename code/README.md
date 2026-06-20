@@ -30,18 +30,34 @@ python code/main.py --topic "近年来Agent Memory有哪些研究方向？" --ma
 python code/main.py --topic "Agent Memory综述" --pdf "7-Agent-lab(1).pdf" --mock auto
 ```
 
+真实 DeepSeek 模型模式：
+
+```bash
+set DEEPSEEK_API_KEY=your_key_here
+python code/main.py --provider deepseek --topic "近年来Agent Memory有哪些研究方向？" --max-papers 5 --mock never
+```
+
 真实 DashScope/Qwen 模型模式：
 
 ```bash
 set DASHSCOPE_API_KEY=your_key_here
-python code/main.py --topic "近年来Agent Memory有哪些研究方向？" --max-papers 5 --mock never
+python code/main.py --provider dashscope --topic "近年来Agent Memory有哪些研究方向？" --max-papers 5 --mock never
 ```
 
 可选环境变量：
 
+- `DEEPSEEK_API_KEY`：DeepSeek API 密钥。
+- `DEEPSEEK_MODEL`：默认 `deepseek-v4-flash`。
+- `DEEPSEEK_BASE_URL`：默认 `https://api.deepseek.com`。
 - `DASHSCOPE_API_KEY`：真实模型调用密钥。
 - `DASHSCOPE_MODEL`：默认 `qwen-turbo`。
 - `DASHSCOPE_BASE_URL`：默认 `https://dashscope.aliyuncs.com/compatible-mode/v1`。
+
+Provider 选择：
+
+- `--provider auto`：优先使用 `DEEPSEEK_API_KEY`，其次使用 `DASHSCOPE_API_KEY`，都没有则按 `--mock` 策略兜底。
+- `--provider deepseek`：只使用 DeepSeek。
+- `--provider dashscope`：只使用 DashScope/Qwen。
 
 ## 输出文件
 
