@@ -17,6 +17,22 @@
   --input: 34 20% 79%;
   --ring: 28 22% 36%;
   --radius: 0.5rem;
+  color-scheme: light;
+}
+
+.dark {
+  --background: 35 13% 13%;
+  --foreground: 38 24% 88%;
+  --paper: 36 15% 16%;
+  --paper-foreground: 38 24% 88%;
+  --muted: 34 12% 24%;
+  --muted-foreground: 38 11% 64%;
+  --accent: 35 13% 25%;
+  --accent-foreground: 38 24% 90%;
+  --border: 34 10% 30%;
+  --input: 34 10% 30%;
+  --ring: 38 18% 72%;
+  color-scheme: dark;
 }
 
 * {

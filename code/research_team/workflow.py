@@ -4,7 +4,7 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List
+from typing import Any, Callable, Dict, List
 
 from research_team.agents import (
     CriticAgent,
@@ -17,6 +17,18 @@ from research_team.agents import (
 from research_team.llm import build_llm
 from research_team.memory import LongTermMemory
 from research_team.models import ResearchState
+
+EventSink = Callable[[Dict[str, Any]], None]
+
+NODE_AGENT_MAP = {
+    "manager": ("planner", "Planner", 18),
+    "memory_retrieve": ("planner", "Memory", 28),
+    "search": ("scholar", "Scholar", 44),
+    "read": ("reader", "Reader", 62),
+    "critique": ("critic", "Critic", 78),
+    "write": ("writer", "Writer", 92),
+    "memory_update": ("writer", "Memory", 100),
+}
 
 
 def run_research_workflow(
@@ -32,6 +44,7 @@ def run_research_workflow(
     provider: str = "auto",
     run_name: str = "",
     latest_dir: Path | None = None,
+    event_sink: EventSink | None = None,
 ) -> ResearchState:
     llm, llm_warnings = build_llm(mock_mode, provider)
     state: ResearchState = {
@@ -119,12 +132,116 @@ def run_research_workflow(
         ("memory_update", memory_update_node),
     ]
 
-    state = run_with_langgraph_if_available(state, nodes)
+    emit_event(
+        event_sink,
+        {
+            "type": "trace.append",
+            "agentId": "planner",
+            "title": "Run started",
+            "detail": f"Research topic: {topic}",
+        },
+    )
+    state = run_with_langgraph_if_available(state, instrument_nodes(nodes, event_sink))
     state["completed_at"] = datetime.now().isoformat(timespec="seconds")
     write_run_log(state)
     if latest_dir:
         publish_latest(Path(state["output_dir"]), latest_dir)
     return state
+
+
+def instrument_nodes(
+    nodes: List[tuple[str, Callable[[ResearchState], ResearchState]]],
+    event_sink: EventSink | None,
+) -> List[tuple[str, Callable[[ResearchState], ResearchState]]]:
+    if event_sink is None:
+        return nodes
+
+    wrapped = []
+    for name, node in nodes:
+        agent_id, label, progress = NODE_AGENT_MAP.get(name, ("planner", name, 0))
+
+        def wrapped_node(
+            current: ResearchState,
+            node_name: str = name,
+            node_func: Callable[[ResearchState], ResearchState] = node,
+            current_agent_id: str = agent_id,
+            current_label: str = label,
+            current_progress: int = progress,
+        ) -> ResearchState:
+            emit_event(
+                event_sink,
+                {
+                    "type": "agent.status",
+                    "agentId": current_agent_id,
+                    "status": "working",
+                    "currentTask": f"{current_label} is running {node_name}",
+                    "progress": max(current_progress - 12, 4),
+                },
+            )
+            emit_event(
+                event_sink,
+                {
+                    "type": "trace.append",
+                    "agentId": current_agent_id,
+                    "title": f"{current_label} started",
+                    "detail": f"Executing workflow node: {node_name}",
+                },
+            )
+            next_state = node_func(current)
+            emit_event(
+                event_sink,
+                {
+                    "type": "agent.status",
+                    "agentId": current_agent_id,
+                    "status": "done",
+                    "currentTask": f"{current_label} finished {node_name}",
+                    "progress": current_progress,
+                },
+            )
+            emit_event(
+                event_sink,
+                {
+                    "type": "trace.append",
+                    "agentId": current_agent_id,
+                    "title": f"{current_label} completed",
+                    "detail": summarize_node_result(node_name, next_state),
+                },
+            )
+            return next_state
+
+        wrapped.append((name, wrapped_node))
+    return wrapped
+
+
+def emit_event(event_sink: EventSink | None, event: Dict[str, Any]) -> None:
+    if event_sink is None:
+        return
+    event.setdefault("timestamp", datetime.now().isoformat(timespec="seconds"))
+    event_sink(event)
+
+
+def summarize_node_result(node_name: str, state: ResearchState) -> str:
+    if node_name == "manager":
+        return "Planning is ready."
+    if node_name == "memory_retrieve":
+        return f"Retrieved {len(state.get('retrieved_memories', []))} memory entries."
+    if node_name == "search":
+        return (
+            f"Accepted {len(state.get('papers', []))} papers and rejected "
+            f"{len(state.get('rejected_papers', []))} candidates."
+        )
+    if node_name == "read":
+        return (
+            f"Produced {len(state.get('paper_analyses', []))} paper analyses and "
+            f"{len(state.get('pdf_notes', []))} PDF notes."
+        )
+    if node_name == "critique":
+        return "Reflection summary is ready."
+    if node_name == "write":
+        return f"Wrote report artifacts to {state.get('output_dir', '')}."
+    if node_name == "memory_update":
+        return f"Updated long-term memory at {state.get('memory_path', '')}."
+    return "Node completed."
 
 
 def run_with_langgraph_if_available(

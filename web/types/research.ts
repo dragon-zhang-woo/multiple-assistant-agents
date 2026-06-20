@@ -1,10 +1,12 @@
 export type AgentId = "planner" | "scholar" | "reader" | "critic" | "writer";
 
-export type AgentStatus = "idle" | "queued" | "working" | "reviewing" | "done";
+export type AgentStatus = "idle" | "queued" | "working" | "reviewing" | "done" | "error";
 
 export type MessageRole = "user" | "assistant";
 
 export type ArtifactKind = "markdown" | "literature-matrix" | "code";
+
+export type ProviderId = "auto" | "deepseek" | "dashscope" | "mock";
 
 export type NonEmptyArray<T> = [T, ...T[]];
 
@@ -77,4 +79,47 @@ export interface ResearchSession {
   messages: ThreadMessage[];
   trace: AgentTraceEvent[];
   artifacts: NonEmptyArray<Artifact>;
+}
+
+export interface ProviderInfo {
+  id: Exclude<ProviderId, "auto">;
+  label: string;
+  configured: boolean;
+  defaultModel: string;
+  baseUrl: string;
+  note: string;
+}
+
+export interface ProvidersResponse {
+  providers: ProviderInfo[];
+  defaultProvider: ProviderId;
+}
+
+export interface UploadedPdf {
+  id: string;
+  name: string;
+  size: number;
+  path: string;
+}
+
+export interface ResearchSettings {
+  provider: ProviderId;
+  model: string;
+  maxPapers: number;
+  candidatePool: number;
+  minRelevance: number;
+  sort: "relevance" | "submittedDate";
+  mockMode: "auto" | "always" | "never";
+}
+
+export interface RunSummary {
+  runName: string;
+  workflowEngine: string;
+  llmMode: string;
+  reportPath: string;
+  mindmapPath: string;
+  runLogPath: string;
+  warnings: string[];
+  paperCount: number;
+  rejectedCount: number;
 }
