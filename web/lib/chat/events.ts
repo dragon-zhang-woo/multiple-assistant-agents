@@ -2,8 +2,17 @@ import type {
   AgentId,
   AgentStatus,
   Artifact,
+  RunSummary,
+  ResearchSettings,
+  UploadedPdf,
   ThreadMessage
 } from "@/types/research";
+
+export interface ChatRequest {
+  topic: string;
+  settings: ResearchSettings;
+  uploads: UploadedPdf[];
+}
 
 export type ChatStreamEvent =
   | {
@@ -31,8 +40,39 @@ export type ChatStreamEvent =
       agentId: AgentId;
       title: string;
       detail: string;
+      timestamp?: string;
+    }
+  | {
+      type: "run.completed";
+      runName: string;
+      workflowEngine: string;
+      llmMode: string;
+      reportPath: string;
+      mindmapPath: string;
+      runLogPath: string;
+      warnings: string[];
+      paperCount: number;
+      rejectedCount: number;
+    }
+  | {
+      type: "run.error";
+      message: string;
     };
 
 export interface ChatTransport {
-  sendMessage(input: string): AsyncIterable<ChatStreamEvent>;
+  sendMessage(request: ChatRequest): AsyncIterable<ChatStreamEvent>;
+}
+
+export function toRunSummary(event: Extract<ChatStreamEvent, { type: "run.completed" }>): RunSummary {
+  return {
+    runName: event.runName,
+    workflowEngine: event.workflowEngine,
+    llmMode: event.llmMode,
+    reportPath: event.reportPath,
+    mindmapPath: event.mindmapPath,
+    runLogPath: event.runLogPath,
+    warnings: event.warnings,
+    paperCount: event.paperCount,
+    rejectedCount: event.rejectedCount
+  };
 }

@@ -15,6 +15,13 @@ export function ResearchWorkbench() {
           projects={thread.projects}
           activeProjectId={thread.activeProject.id}
           onSelectProject={thread.setActiveProjectId}
+          providers={thread.providers}
+          settings={thread.settings}
+          onSettingsChange={thread.updateSettings}
+          onSelectProvider={thread.selectProvider}
+          runSummary={thread.runSummary}
+          theme={thread.theme}
+          onToggleTheme={thread.toggleTheme}
         />
         <MainThread
           project={thread.activeProject}
@@ -24,7 +31,13 @@ export function ResearchWorkbench() {
           traceOpen={thread.traceOpen}
           onTraceOpenChange={thread.setTraceOpen}
           onSendMessage={thread.sendMessage}
+          onUploadFiles={thread.uploadFiles}
+          onRemoveUpload={thread.removeUpload}
           onSelectArtifact={thread.setActiveArtifactId}
+          uploads={thread.uploads}
+          uploadError={thread.uploadError}
+          runError={thread.runError}
+          isRunning={thread.isRunning}
         />
         <ArtifactPanel
           artifacts={thread.artifacts}

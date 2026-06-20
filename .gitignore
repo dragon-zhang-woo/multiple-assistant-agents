@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 .env
+.env.local
 .venv/
 venv/
 .pytest_cache/
@@ -14,10 +15,14 @@ web/node_modules/
 web/.next/
 web/out/
 web/.npm-cache/
+web/.uploads/
+web/.runs/
+web/.env.local
 web/tsconfig.tsbuildinfo
 web/node_modules_stale_*/
 web/qa-screenshots/
 web/dev-server*.log
+output/playwright/
 
 # Course materials and provided examples are local references only.
 AgentLab/

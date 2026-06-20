@@ -36,6 +36,7 @@ class ManagerAgent:
             "要求用6条以内覆盖检索、阅读、反思、写作、记忆更新；不要写理想系统能力。"
         )
         plan = llm.invoke(system_prompt, user_prompt)
+        plan = safe_manager_plan(plan, state)
         state["plan"] = plan
         add_message(state, self.name, f"Planning result: {plan}")
         return state
@@ -274,6 +275,48 @@ def infer_tags(text: str) -> List[str]:
         if any(keyword in lowered for keyword in keywords):
             tags.append(tag)
     return tags or ["agent-memory"]
+
+
+def safe_manager_plan(plan: str, state: ResearchState) -> str:
+    lowered = plan.lower()
+    forbidden_terms = [
+        "google scholar",
+        "semantic scholar",
+        "chroma",
+        "faiss",
+        "neo4j",
+        "parallel crawling",
+        "完整文本",
+        "全文",
+        "最新 10",
+        "最新10",
+        "10 篇",
+        "10篇",
+    ]
+    has_pdf = bool(state.get("pdf_paths", []))
+    if any(term in lowered for term in forbidden_terms) or (
+        not has_pdf and ("pdf" in lowered or "本地 pdf" in lowered)
+    ):
+        return build_safe_manager_plan(state)
+    return plan
+
+
+def build_safe_manager_plan(state: ResearchState) -> str:
+    pdf_step = (
+        "3. 若用户上传本地PDF，则用pdfplumber抽取前几页文本；否则只基于论文元数据和摘要分析。"
+        if state.get("pdf_paths")
+        else "3. 本轮未上传PDF，ReadingAgent只基于论文标题、摘要和元数据做结构化提取。"
+    )
+    return "\n".join(
+        [
+            "1. ManagerAgent明确主题、检索参数和本轮可用工具边界。",
+            "2. SearchAgent使用arXiv检索式和本地相关性评分筛选候选论文。",
+            pdf_step,
+            "4. ReadingAgent提取每篇论文的贡献、方法、局限、标签和方向分类。",
+            "5. CriticAgent只基于已提取材料做Reflection，指出证据不足、评测和隐私风险。",
+            "6. WriterAgent生成survey.md、mindmap.md、run_log.json，并更新JSON长期记忆。",
+        ]
+    )
 
 
 def infer_category(title: str, summary: str) -> str:

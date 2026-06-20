@@ -10,7 +10,8 @@ import type {
   AgentProfile,
   AgentTraceEvent,
   ResearchProject,
-  ThreadMessage
+  ThreadMessage,
+  UploadedPdf
 } from "@/types/research";
 
 interface MainThreadProps {
@@ -21,7 +22,13 @@ interface MainThreadProps {
   traceOpen: boolean;
   onTraceOpenChange: (open: boolean) => void;
   onSendMessage: (content: string) => void;
+  onUploadFiles: (files: FileList | File[]) => Promise<void>;
+  onRemoveUpload: (id: string) => void;
   onSelectArtifact: (artifactId: string) => void;
+  uploads: UploadedPdf[];
+  uploadError: string;
+  runError: string;
+  isRunning: boolean;
 }
 
 export function MainThread({
@@ -32,7 +39,13 @@ export function MainThread({
   traceOpen,
   onTraceOpenChange,
   onSendMessage,
-  onSelectArtifact
+  onUploadFiles,
+  onRemoveUpload,
+  onSelectArtifact,
+  uploads,
+  uploadError,
+  runError,
+  isRunning
 }: MainThreadProps) {
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col bg-paper">
@@ -59,8 +72,16 @@ export function MainThread({
             messages={messages}
             agents={agents}
             onSelectArtifact={onSelectArtifact}
+            runError={runError}
           />
-          <Composer onSendMessage={onSendMessage} />
+          <Composer
+            onSendMessage={onSendMessage}
+            onUploadFiles={onUploadFiles}
+            onRemoveUpload={onRemoveUpload}
+            uploads={uploads}
+            uploadError={uploadError}
+            isRunning={isRunning}
+          />
         </div>
         <AgentTraceDrawer
           open={traceOpen}

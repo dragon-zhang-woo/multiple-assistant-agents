@@ -13,7 +13,8 @@ const statusLabels: Record<AgentStatus, string> = {
   queued: "Queued",
   working: "Working",
   reviewing: "Reviewing",
-  done: "Done"
+  done: "Done",
+  error: "Error"
 };
 
 export function AgentStatusStrip({ agents }: AgentStatusStripProps) {
@@ -56,6 +57,9 @@ function StatusIcon({ status }: { status: AgentStatus }) {
   }
   if (status === "working" || status === "reviewing") {
     return <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />;
+  }
+  if (status === "error") {
+    return <Circle className="h-3.5 w-3.5 fill-muted text-foreground" />;
   }
   return (
     <Circle

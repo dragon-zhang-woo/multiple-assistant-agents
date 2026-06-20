@@ -25,13 +25,36 @@ $env:DEEPSEEK_API_KEY="your_key_here"
 
 ## Web Workbench
 
-`web/` 是 Claude-like 多 Agent 科研协作助手前端，使用 Next.js App Router、React、TypeScript、Tailwind CSS 和 shadcn/ui 风格组件。
+`web/` 是 Claude-like 多 Agent 科研协作助手前端，使用 Next.js App Router、React、TypeScript、Tailwind CSS 和 shadcn/ui 风格组件。它通过 Next API 复用 `code/` 中的 Python 多 Agent workflow，并使用 SSE 显示 Planner、Scholar、Reader、Critic、Writer 的阶段进度。
 
 ```bash
 cd web
 npm install
 npm run dev
 ```
+
+打开 `http://localhost:3000` 后，可以在左侧选择 provider、模型、论文数量、候选池、相关性阈值和排序方式；中间输入科研问题并可上传 PDF；右侧会显示 `survey`、`mindmap`、文献矩阵和 `run_log`。界面支持亮色/暗色主题。
+
+### Web API key
+
+Web 端不在浏览器保存 API key。请在 `web/.env.local` 或启动 dev server 的 PowerShell 环境中配置服务端变量：
+
+```powershell
+Copy-Item .env.local.example .env.local
+notepad .env.local
+```
+
+或直接在当前 PowerShell 设置：
+
+```powershell
+$env:DEEPSEEK_API_KEY="your_key_here"
+$env:DEEPSEEK_MODEL="deepseek-v4-flash"
+
+$env:DASHSCOPE_API_KEY="your_key_here"
+$env:DASHSCOPE_MODEL="qwen-turbo"
+```
+
+保存或设置变量后，重启 `npm run dev`。左侧 `Server key` 会显示 `configured` 或 `missing`。`web/.env.local`、上传 PDF、运行缓存和构建产物均已加入 `.gitignore`。
 
 校验命令：
 

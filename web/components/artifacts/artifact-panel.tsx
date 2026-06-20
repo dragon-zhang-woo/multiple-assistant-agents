@@ -61,22 +61,28 @@ export function ArtifactPanel({
           <PanelRightClose className="h-4 w-4" />
         </Button>
       </header>
-      <div className="flex shrink-0 gap-1 border-b border-border px-3 py-2">
-        {artifacts.map((item) => (
-          <button
-            key={item.id}
-            className={cn(
-              "rounded-md px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
-              item.id === activeArtifactId && "bg-accent text-foreground"
-            )}
-            onClick={() => onSelectArtifact(item.id)}
-          >
-            {item.title}
-          </button>
-        ))}
-      </div>
-      {artifact && (
+      {artifacts.length > 0 && (
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-3 py-2 quiet-scrollbar">
+          {artifacts.map((item) => (
+            <button
+              key={item.id}
+              className={cn(
+                "rounded-md px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                item.id === activeArtifactId && "bg-accent text-foreground"
+              )}
+              onClick={() => onSelectArtifact(item.id)}
+            >
+              {item.title}
+            </button>
+          ))}
+        </div>
+      )}
+      {artifact ? (
         <ArtifactContent key={artifact.id} artifact={artifact} />
+      ) : (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center text-sm leading-6 text-muted-foreground">
+          运行一个研究任务后，这里会显示 survey、mindmap、literature matrix 和 run log。
+        </div>
       )}
     </aside>
   );
