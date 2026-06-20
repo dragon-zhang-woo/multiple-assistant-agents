@@ -8,6 +8,16 @@ runs/
 outputs/
 data/
 memory/
+node_modules/
+.next/
+web/node_modules/
+web/.next/
+web/out/
+web/.npm-cache/
+web/tsconfig.tsbuildinfo
+web/node_modules_stale_*/
+web/qa-screenshots/
+web/dev-server*.log
 
 # Course materials and provided examples are local references only.
 AgentLab/

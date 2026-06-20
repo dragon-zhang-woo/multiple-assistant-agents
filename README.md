@@ -2,7 +2,7 @@
 
 期末作业初版：AI科研助手多智能体系统。核心代码在 `code/`，方案说明见 `方案.md`。
 
-## Quick Start
+## CLI Quick Start
 
 ```bash
 python -m venv .venv
@@ -22,3 +22,21 @@ $env:DEEPSEEK_API_KEY="your_key_here"
 ```
 
 默认 DeepSeek 模型为 `deepseek-v4-flash`，可用 `DEEPSEEK_MODEL` 覆盖。
+
+## Web Workbench
+
+`web/` 是 Claude-like 多 Agent 科研协作助手前端，使用 Next.js App Router、React、TypeScript、Tailwind CSS 和 shadcn/ui 风格组件。
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+校验命令：
+
+```bash
+npm run lint
+npm run typecheck
+npm run build
+```
