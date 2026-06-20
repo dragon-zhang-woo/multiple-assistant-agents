@@ -2,10 +2,10 @@
 
 import {
   BookOpen,
-  ChevronDown,
   Clock3,
   FileText,
   Moon,
+  Plus,
   Search,
   SlidersHorizontal,
   Sun
@@ -32,6 +32,9 @@ interface ResearchSidebarProps {
   runSummary: RunSummary | null;
   theme: "light" | "dark";
   onToggleTheme: () => void;
+  onCreateThread: () => void;
+  searchQuery: string;
+  onSearchQueryChange: (query: string) => void;
 }
 
 export function ResearchSidebar({
@@ -44,7 +47,10 @@ export function ResearchSidebar({
   onSelectProvider,
   runSummary,
   theme,
-  onToggleTheme
+  onToggleTheme,
+  onCreateThread,
+  searchQuery,
+  onSearchQueryChange
 }: ResearchSidebarProps) {
   const selectedProvider = providers.find((provider) => provider.id === settings.provider);
 
@@ -68,16 +74,28 @@ export function ResearchSidebar({
               <Moon className="h-4 w-4" />
             )}
           </Button>
-          <Button variant="quiet" size="icon" aria-label="切换工作区">
-            <ChevronDown className="h-4 w-4" />
+          <Button
+            variant="quiet"
+            size="icon"
+            aria-label="新建线程"
+            onClick={onCreateThread}
+            title="新建线程"
+          >
+            <Plus className="h-4 w-4" />
           </Button>
         </div>
       </div>
       <div className="px-3 pb-3">
-        <div className="flex h-9 items-center gap-2 rounded-md border border-border bg-paper px-3 text-xs text-muted-foreground">
+        <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-paper px-3 text-xs text-muted-foreground focus-within:border-foreground/35">
           <Search className="h-3.5 w-3.5" />
-          Search threads
-        </div>
+          <input
+            value={searchQuery}
+            onChange={(event) => onSearchQueryChange(event.target.value)}
+            placeholder="Search threads"
+            className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            aria-label="Search threads"
+          />
+        </label>
       </div>
       <Separator />
       <div className="flex-1 overflow-y-auto px-2 py-3 quiet-scrollbar">
@@ -109,6 +127,11 @@ export function ResearchSidebar({
               </div>
             </button>
           ))}
+          {projects.length === 0 && (
+            <div className="rounded-md border border-border bg-paper/45 px-3 py-4 text-xs leading-5 text-muted-foreground">
+              No matching threads.
+            </div>
+          )}
         </div>
         <Separator className="my-4" />
         <SettingsPanel

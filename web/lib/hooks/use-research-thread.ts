@@ -73,7 +73,7 @@ const initialSettings: ResearchSettings = {
 };
 
 const defaultProject: ResearchProject = {
-  id: "new-run",
+  id: "thread-initial",
   name: "New research run",
   updatedAt: "ready",
   description: "输入主题后启动真实多 Agent 科研流程",
@@ -82,13 +82,12 @@ const defaultProject: ResearchProject = {
 
 export function useResearchThread() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [projects, setProjects] = useState<ResearchProject[]>([defaultProject]);
+  const [sessions, setSessions] = useState<Record<string, ThreadSession>>(() => ({
+    [defaultProject.id]: createSession(defaultProject)
+  }));
+  const [projectOrder, setProjectOrder] = useState<string[]>([defaultProject.id]);
   const [activeProjectId, setActiveProjectId] = useState(defaultProject.id);
-  const [messages, setMessages] = useState<ThreadMessage[]>([]);
-  const [agents, setAgents] = useState<AgentProfile[]>(initialAgents);
-  const [trace, setTrace] = useState<ChatTrace[]>([]);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [activeArtifactId, setActiveArtifactId] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [artifactCollapsed, setArtifactCollapsed] = useState(false);
   const [traceOpen, setTraceOpen] = useState(false);
   const [providers, setProviders] = useState<ProviderInfo[]>([
@@ -102,11 +101,7 @@ export function useResearchThread() {
     }
   ]);
   const [settings, setSettings] = useState<ResearchSettings>(initialSettings);
-  const [uploads, setUploads] = useState<UploadedPdf[]>([]);
-  const [uploadError, setUploadError] = useState("");
-  const [runError, setRunError] = useState("");
-  const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
+  const [isRunningByThread, setIsRunningByThread] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("research-theme");
@@ -139,26 +134,40 @@ export function useResearchThread() {
         }));
       })
       .catch(() => {
-        setRunError("无法读取服务端 provider 配置，已保留 mock 模式。");
+        updateSession(activeProjectId, (session) => ({
+          ...session,
+          runError: "无法读取服务端 provider 配置，已保留 mock 模式。"
+        }));
       });
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [activeProjectId]);
 
+  const projects = useMemo(
+    () => projectOrder.map((id) => sessions[id]?.project).filter(Boolean),
+    [projectOrder, sessions]
+  );
+  const filteredProjects = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) {
+      return projects;
+    }
+    return projects.filter((project) => {
+      const haystack = `${project.name} ${project.description} ${project.updatedAt}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [projects, searchQuery]);
+  const activeSession = sessions[activeProjectId] ?? createSession(defaultProject);
+  const activeProject = activeSession.project;
   const activeArtifact = useMemo(
     () =>
-      artifacts.find((artifact) => artifact.id === activeArtifactId) ??
-      artifacts[0],
-    [activeArtifactId, artifacts]
+      activeSession.artifacts.find(
+        (artifact) => artifact.id === activeSession.activeArtifactId
+      ) ?? activeSession.artifacts[0],
+    [activeSession.activeArtifactId, activeSession.artifacts]
   );
-  const activeProject = useMemo(
-    () =>
-      projects.find((project) => project.id === activeProjectId) ??
-      projects[0] ??
-      defaultProject,
-    [activeProjectId, projects]
-  );
+  const isRunning = Boolean(isRunningByThread[activeProjectId]);
 
   function updateSettings(next: Partial<ResearchSettings>) {
     setSettings((current) => ({
@@ -184,12 +193,32 @@ export function useResearchThread() {
     setTheme((current) => (current === "dark" ? "light" : "dark"));
   }
 
+  function createNewThread() {
+    const id = `thread-${Date.now()}`;
+    const project: ResearchProject = {
+      id,
+      name: "New research run",
+      updatedAt: "ready",
+      description: "输入主题后启动真实多 Agent 科研流程",
+      status: "active"
+    };
+    setSessions((current) => ({
+      ...current,
+      [id]: createSession(project)
+    }));
+    setProjectOrder((current) => [id, ...current]);
+    setActiveProjectId(id);
+    setTraceOpen(false);
+    setArtifactCollapsed(false);
+  }
+
   async function uploadFiles(files: FileList | File[]) {
     const list = Array.from(files);
     if (!list.length) {
       return;
     }
-    setUploadError("");
+    const threadId = activeProjectId;
+    updateSession(threadId, (session) => ({ ...session, uploadError: "" }));
     const formData = new FormData();
     for (const file of list) {
       formData.append("files", file);
@@ -203,38 +232,62 @@ export function useResearchThread() {
       error?: string;
     };
     if (!response.ok) {
-      setUploadError(data.error ?? "PDF 上传失败。");
+      updateSession(threadId, (session) => ({
+        ...session,
+        uploadError: data.error ?? "PDF 上传失败。"
+      }));
       return;
     }
-    setUploads((current) => [...current, ...(data.files ?? [])]);
+    updateSession(threadId, (session) => ({
+      ...session,
+      uploads: [...session.uploads, ...(data.files ?? [])]
+    }));
   }
 
   function removeUpload(id: string) {
-    setUploads((current) => current.filter((file) => file.id !== id));
+    updateSession(activeProjectId, (session) => ({
+      ...session,
+      uploads: session.uploads.filter((file) => file.id !== id)
+    }));
   }
 
   async function sendMessage(content: string) {
     const topic = content.trim();
-    if (!topic || isRunning) {
+    const threadId = activeProjectId;
+    if (!topic || isRunningByThread[threadId]) {
       return;
     }
-    const createdAt = timeLabel();
-    setMessages((current) => [
+    const session = sessions[threadId];
+    if (!session) {
+      return;
+    }
+
+    updateSession(threadId, (current) => ({
       ...current,
-      {
-        id: `user-${Date.now()}`,
-        role: "user",
-        createdAt,
-        content: topic
-      }
-    ]);
-    setRunError("");
-    setRunSummary(null);
-    setTrace([]);
-    setArtifacts([]);
-    setActiveArtifactId("");
-    setAgents(resetAgents("queued"));
-    setIsRunning(true);
+      project: {
+        ...current.project,
+        name: topic.slice(0, 34) || "Research run",
+        description: "Running multi-agent workflow",
+        updatedAt: "running"
+      },
+      messages: [
+        ...current.messages,
+        {
+          id: `user-${Date.now()}`,
+          role: "user",
+          createdAt: timeLabel(),
+          content: topic
+        }
+      ],
+      agents: resetAgents("queued"),
+      trace: [],
+      artifacts: [],
+      activeArtifactId: "",
+      runError: "",
+      runSummary: null
+    }));
+    setProjectOrder((current) => [threadId, ...current.filter((id) => id !== threadId)]);
+    setIsRunningByThread((current) => ({ ...current, [threadId]: true }));
     setTraceOpen(true);
 
     const transport = new SseChatTransport();
@@ -242,22 +295,27 @@ export function useResearchThread() {
       for await (const event of transport.sendMessage({
         topic,
         settings,
-        uploads
+        uploads: session.uploads
       })) {
-        handleStreamEvent(event, topic);
+        handleStreamEvent(threadId, event, topic);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "运行失败。";
-      handleRunError(message);
+      handleRunError(threadId, message);
     } finally {
-      setIsRunning(false);
+      setIsRunningByThread((current) => ({ ...current, [threadId]: false }));
     }
   }
 
-  function handleStreamEvent(event: ChatStreamEvent, topic: string) {
+  function handleStreamEvent(
+    threadId: string,
+    event: ChatStreamEvent,
+    topic: string
+  ) {
     if (event.type === "agent.status") {
-      setAgents((current) =>
-        current.map((agent) =>
+      updateSession(threadId, (session) => ({
+        ...session,
+        agents: session.agents.map((agent) =>
           agent.id === event.agentId
             ? {
                 ...agent,
@@ -267,123 +325,89 @@ export function useResearchThread() {
               }
             : agent
         )
-      );
+      }));
       return;
     }
 
     if (event.type === "trace.append") {
-      setTrace((current) => [
-        ...current,
-        {
-          id: `trace-${Date.now()}-${current.length}`,
-          agentId: event.agentId,
-          title: event.title,
-          detail: event.detail,
-          status: "done",
-          timestamp: event.timestamp
-            ? new Date(event.timestamp).toLocaleTimeString("zh-CN", {
-                hour: "2-digit",
-                minute: "2-digit"
-              })
-            : timeLabel()
-        }
-      ]);
+      updateSession(threadId, (session) => ({
+        ...session,
+        trace: [
+          ...session.trace,
+          {
+            id: `trace-${Date.now()}-${session.trace.length}`,
+            agentId: event.agentId,
+            title: event.title,
+            detail: event.detail,
+            status: "done",
+            timestamp: event.timestamp
+              ? new Date(event.timestamp).toLocaleTimeString("zh-CN", {
+                  hour: "2-digit",
+                  minute: "2-digit"
+                })
+              : timeLabel()
+          }
+        ]
+      }));
       return;
     }
 
     if (event.type === "artifact.upsert") {
-      upsertArtifact(event.artifact);
-      setActiveArtifactId((current) => current || event.artifact.id);
+      updateSession(threadId, (session) => ({
+        ...session,
+        artifacts: upsertArtifact(session.artifacts, event.artifact),
+        activeArtifactId: session.activeArtifactId || event.artifact.id
+      }));
       setArtifactCollapsed(false);
       return;
     }
 
     if (event.type === "message.delta") {
-      appendAssistantDelta(event.messageId, event.delta);
+      updateSession(threadId, (session) => ({
+        ...session,
+        messages: appendAssistantDelta(
+          session.messages,
+          event.messageId,
+          event.delta
+        )
+      }));
       return;
     }
 
     if (event.type === "message.done") {
-      setMessages((current) => [...current, event.message]);
+      updateSession(threadId, (session) => ({
+        ...session,
+        messages: [...session.messages, event.message]
+      }));
       return;
     }
 
     if (event.type === "run.completed") {
       const summary = toRunSummary(event);
-      setRunSummary(summary);
-      setProjects((current) => [
-        {
-          id: summary.runName,
+      updateSession(threadId, (session) => ({
+        ...session,
+        runSummary: summary,
+        project: {
+          ...session.project,
           name: topic.slice(0, 34) || "Research run",
           updatedAt: "just now",
-          description: `${summary.paperCount} papers · ${summary.llmMode}`,
-          status: "active"
-        },
-        ...current.filter((project) => project.id !== "new-run").slice(0, 7)
-      ]);
-      setActiveProjectId(summary.runName);
+          description: `${summary.paperCount} papers · ${summary.llmMode}`
+        }
+      }));
+      setProjectOrder((current) => [threadId, ...current.filter((id) => id !== threadId)]);
       return;
     }
 
     if (event.type === "run.error") {
-      handleRunError(event.message);
+      handleRunError(threadId, event.message);
     }
   }
 
-  function appendAssistantDelta(messageId: string, delta: string) {
-    setMessages((current) => {
-      const existing = current.find((message) => message.id === messageId);
-      if (!existing) {
-        return [
-          ...current,
-          {
-            id: messageId,
-            role: "assistant",
-            agentId: "writer",
-            createdAt: timeLabel(),
-            content: delta
-          }
-        ];
-      }
-      return current.map((message) =>
-        message.id === messageId
-          ? {
-              ...message,
-              content: `${message.content}${delta}`
-            }
-          : message
-      );
-    });
-  }
-
-  function upsertArtifact(artifact: Artifact) {
-    setArtifacts((current) => {
-      const existing = current.find((item) => item.id === artifact.id);
-      if (!existing) {
-        return [...current, artifact];
-      }
-      const versions = [
-        ...existing.versions,
-        ...artifact.versions.filter(
-          (version) =>
-            !existing.versions.some((item) => item.id === version.id)
-        )
-      ] as NonEmptyArray<Artifact["versions"][number]>;
-      return current.map((item) =>
-        item.id === artifact.id
-          ? {
-              ...artifact,
-              versions
-            }
-          : item
-      );
-    });
-  }
-
-  function handleRunError(message: string) {
-    setRunError(message);
-    setAgents((current) =>
-      current.map((agent) =>
+  function handleRunError(threadId: string, message: string) {
+    updateSession(threadId, (session) => ({
+      ...session,
+      runError: message,
+      agents: session.agents.map((agent) =>
         agent.status === "working" || agent.status === "queued"
           ? {
               ...agent,
@@ -391,31 +415,55 @@ export function useResearchThread() {
               currentTask: "运行中断"
             }
           : agent
-      )
-    );
-    setMessages((current) => [
-      ...current,
-      {
-        id: `error-${Date.now()}`,
-        role: "assistant",
-        agentId: "writer",
-        createdAt: timeLabel(),
-        content: `运行失败：${message}`
+      ),
+      messages: [
+        ...session.messages,
+        {
+          id: `error-${Date.now()}`,
+          role: "assistant",
+          agentId: "writer",
+          createdAt: timeLabel(),
+          content: `运行失败：${message}`
+        }
+      ]
+    }));
+  }
+
+  function updateSession(
+    threadId: string,
+    updater: (session: ThreadSession) => ThreadSession
+  ) {
+    setSessions((current) => {
+      const session = current[threadId];
+      if (!session) {
+        return current;
       }
-    ]);
+      return {
+        ...current,
+        [threadId]: updater(session)
+      };
+    });
   }
 
   return {
-    projects,
+    projects: filteredProjects,
     activeProject,
+    activeProjectId,
     setActiveProjectId,
-    agents,
-    messages,
-    trace,
-    artifacts,
+    createNewThread,
+    searchQuery,
+    setSearchQuery,
+    agents: activeSession.agents,
+    messages: activeSession.messages,
+    trace: activeSession.trace,
+    artifacts: activeSession.artifacts,
     activeArtifact,
-    activeArtifactId,
-    setActiveArtifactId,
+    activeArtifactId: activeSession.activeArtifactId,
+    setActiveArtifactId: (artifactId: string) =>
+      updateSession(activeProjectId, (session) => ({
+        ...session,
+        activeArtifactId: artifactId
+      })),
     artifactCollapsed,
     setArtifactCollapsed,
     traceOpen,
@@ -424,12 +472,12 @@ export function useResearchThread() {
     settings,
     updateSettings,
     selectProvider,
-    uploads,
+    uploads: activeSession.uploads,
     uploadFiles,
     removeUpload,
-    uploadError,
-    runError,
-    runSummary,
+    uploadError: activeSession.uploadError,
+    runError: activeSession.runError,
+    runSummary: activeSession.runSummary,
     isRunning,
     theme,
     toggleTheme,
@@ -446,6 +494,34 @@ type ChatTrace = {
   timestamp: string;
 };
 
+interface ThreadSession {
+  project: ResearchProject;
+  messages: ThreadMessage[];
+  agents: AgentProfile[];
+  trace: ChatTrace[];
+  artifacts: Artifact[];
+  activeArtifactId: string;
+  uploads: UploadedPdf[];
+  uploadError: string;
+  runError: string;
+  runSummary: RunSummary | null;
+}
+
+function createSession(project: ResearchProject): ThreadSession {
+  return {
+    project,
+    messages: [],
+    agents: initialAgents,
+    trace: [],
+    artifacts: [],
+    activeArtifactId: "",
+    uploads: [],
+    uploadError: "",
+    runError: "",
+    runSummary: null
+  };
+}
+
 function resetAgents(status: AgentStatus) {
   return initialAgents.map((agent) => ({
     ...agent,
@@ -453,6 +529,55 @@ function resetAgents(status: AgentStatus) {
     progress: 0,
     currentTask: "Waiting for workflow handoff"
   }));
+}
+
+function appendAssistantDelta(
+  messages: ThreadMessage[],
+  messageId: string,
+  delta: string
+) {
+  const existing = messages.find((message) => message.id === messageId);
+  if (!existing) {
+    return [
+      ...messages,
+      {
+        id: messageId,
+        role: "assistant" as const,
+        agentId: "writer" as const,
+        createdAt: timeLabel(),
+        content: delta
+      }
+    ];
+  }
+  return messages.map((message) =>
+    message.id === messageId
+      ? {
+          ...message,
+          content: `${message.content}${delta}`
+        }
+      : message
+  );
+}
+
+function upsertArtifact(artifacts: Artifact[], artifact: Artifact) {
+  const existing = artifacts.find((item) => item.id === artifact.id);
+  if (!existing) {
+    return [...artifacts, artifact];
+  }
+  const versions = [
+    ...existing.versions,
+    ...artifact.versions.filter(
+      (version) => !existing.versions.some((item) => item.id === version.id)
+    )
+  ] as NonEmptyArray<Artifact["versions"][number]>;
+  return artifacts.map((item) =>
+    item.id === artifact.id
+      ? {
+          ...artifact,
+          versions
+        }
+      : item
+  );
 }
 
 function timeLabel() {

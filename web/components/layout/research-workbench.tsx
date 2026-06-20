@@ -22,6 +22,9 @@ export function ResearchWorkbench() {
           runSummary={thread.runSummary}
           theme={thread.theme}
           onToggleTheme={thread.toggleTheme}
+          onCreateThread={thread.createNewThread}
+          searchQuery={thread.searchQuery}
+          onSearchQueryChange={thread.setSearchQuery}
         />
         <MainThread
           project={thread.activeProject}
