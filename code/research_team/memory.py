@@ -17,19 +17,28 @@ class LongTermMemory:
         self.path = path
         self.entries = self._load()
 
-    def retrieve(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
-        query_vec = text_vector(query)
+    def retrieve(
+        self, query: str, top_k: int = 3, min_score: float = 0.12
+    ) -> List[Dict[str, Any]]:
+        query_vec = text_vector(expand_query_for_memory(query))
         scored: List[Dict[str, Any]] = []
         for entry in self.entries:
-            text = " ".join(
+            evidence_text = " ".join(
                 [
-                    entry.get("topic", ""),
                     " ".join(p.get("title", "") for p in entry.get("papers", [])),
                     " ".join(entry.get("tags", [])),
                 ]
             )
+            if entry.get("papers") and cosine(query_vec, text_vector(evidence_text)) == 0:
+                continue
+            text = " ".join(
+                [
+                    entry.get("topic", ""),
+                    evidence_text,
+                ]
+            )
             score = cosine(query_vec, text_vector(text))
-            if score > 0:
+            if score >= min_score:
                 item = dict(entry)
                 item["score"] = round(score, 4)
                 scored.append(item)
@@ -96,8 +105,23 @@ class LongTermMemory:
 
 
 def text_vector(text: str) -> Counter:
-    tokens = re.findall(r"[\u4e00-\u9fff]|[A-Za-z][A-Za-z\-]{2,}", text.lower())
+    tokens = re.findall(r"[A-Za-z][A-Za-z\-]{2,}", text.lower())
+    for chinese_text in re.findall(r"[\u4e00-\u9fff]{2,}", text):
+        tokens.append(chinese_text)
+        tokens.extend(
+            chinese_text[index : index + 2]
+            for index in range(max(len(chinese_text) - 1, 0))
+        )
     return Counter(tokens)
+
+
+def expand_query_for_memory(query: str) -> str:
+    try:
+        from research_team.tools import normalize_arxiv_query
+
+        return f"{query} {normalize_arxiv_query(query)}"
+    except Exception:
+        return query
 
 
 def cosine(left: Counter, right: Counter) -> float:

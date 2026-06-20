@@ -13,7 +13,7 @@ from research_team.workflow import run_research_workflow
 
 def main() -> int:
     try:
-        request = json.loads(sys.stdin.read() or "{}")
+        request = scrub_surrogates(json.loads(sys.stdin.read() or "{}"))
         configure_model_env(request)
         for event in initial_agent_events():
             emit(event)
@@ -294,7 +294,7 @@ def read_text(path: str) -> str:
 
 def emit(event: Dict[str, Any]) -> None:
     event.setdefault("timestamp", now())
-    print(json.dumps(event, ensure_ascii=False), flush=True)
+    print(json.dumps(event, ensure_ascii=True), flush=True)
 
 
 def now() -> str:
@@ -312,6 +312,16 @@ def sanitize_run_name(value: str) -> str:
 
 def sanitize_error(message: str) -> str:
     return re.sub(r"(sk-|ds-)[A-Za-z0-9_-]+", "[redacted]", message)
+
+
+def scrub_surrogates(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.encode("utf-8", "replace").decode("utf-8")
+    if isinstance(value, list):
+        return [scrub_surrogates(item) for item in value]
+    if isinstance(value, dict):
+        return {key: scrub_surrogates(item) for key, item in value.items()}
+    return value
 
 
 if __name__ == "__main__":

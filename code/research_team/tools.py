@@ -64,16 +64,49 @@ NEGATIVE_PATTERNS = {
     "video question answering": 3.0,
     "wearable cameras": 3.0,
     "temporal reasoning": 2.0,
+    "chameleon": 4.0,
+    "gravitational lensing": 4.0,
+    "wave-optics": 3.0,
+    "gamma-ray": 4.0,
+    "particle": 2.0,
+}
+
+CHINESE_QUERY_TERMS = {
+    "霞光": "twilight sky skyglow atmospheric optics sunset sunrise scattering aerosol polarization",
+    "晚霞": "twilight sky skyglow atmospheric optics sunset scattering aerosol polarization",
+    "朝霞": "twilight sky skyglow atmospheric optics sunrise scattering aerosol polarization",
+    "余晖": "twilight sky skyglow atmospheric optics sunset scattering aerosol polarization",
+    "大气光学": "atmospheric optics twilight skyglow scattering",
+    "人工智能": "artificial intelligence machine learning deep learning",
+    "机器学习": "machine learning",
+    "深度学习": "deep learning neural networks",
+    "大模型": "large language model",
+    "语言模型": "language model",
+    "智能体": "agent",
+    "多智能体": "multi-agent agents",
+    "记忆": "memory",
+    "长期记忆": "long-term memory",
 }
 
 
 def normalize_arxiv_query(topic: str) -> str:
+    stripped = topic.strip()
+    if not stripped:
+        return "agent memory"
     if re.search(r"[\u4e00-\u9fff]", topic):
         lowered = topic.lower()
-        if "agent" in lowered and "memory" in lowered:
+        if is_agent_memory_topic(topic):
             return "agent memory large language model"
-        return "large language model agent"
-    return topic.strip() or "agent memory"
+        mapped_terms: List[str] = []
+        for chinese_term, english_terms in CHINESE_QUERY_TERMS.items():
+            if chinese_term in topic:
+                mapped_terms.extend(keyword_tokens(english_terms))
+        embedded_english = keyword_tokens(lowered)
+        mapped_terms.extend(embedded_english)
+        if mapped_terms:
+            return " ".join(dict.fromkeys(mapped_terms))
+        return stripped
+    return stripped
 
 
 def build_arxiv_queries(topic: str) -> List[str]:
@@ -87,7 +120,37 @@ def build_arxiv_queries(topic: str) -> List[str]:
             '(all:"long-term memory" AND all:"agent")',
         ]
     escaped = normalized.replace('"', "")
-    return [f'all:"{escaped}"', f"all:{escaped}"]
+    tokens = keyword_tokens(escaped)
+    if not tokens:
+        return [f'all:"{escaped}"']
+    term_query = " OR ".join(
+        f'ti:"{token}" OR abs:"{token}"' for token in tokens[:6]
+    )
+    and_query = " AND ".join(f'all:"{token}"' for token in tokens[:4])
+    return [f"({term_query})", f"({and_query})", f'all:"{escaped}"']
+
+
+def is_agent_memory_topic(topic: str) -> bool:
+    lowered = topic.lower()
+    english_agent = "agent" in lowered or "agents" in lowered
+    english_memory = "memory" in lowered
+    chinese_agent = any(term in topic for term in ["智能体", "代理", "智能代理"])
+    chinese_memory = any(term in topic for term in ["记忆", "长期记忆"])
+    return (english_agent or chinese_agent) and (english_memory or chinese_memory)
+
+
+def is_atmospheric_optics_topic(topic: str) -> bool:
+    lowered = topic.lower()
+    return any(term in topic for term in ["霞光", "晚霞", "朝霞", "余晖", "大气光学"]) or any(
+        term in lowered
+        for term in [
+            "twilight",
+            "skyglow",
+            "atmospheric optics",
+            "sunset",
+            "sunrise",
+        ]
+    )
 
 
 def fallback_papers(topic: str, max_results: int) -> List[Paper]:
@@ -178,8 +241,13 @@ def arxiv_search(
     warnings: List[str] = []
     queries = build_arxiv_queries(topic)
     if candidate_pool <= 0:
-        warnings.append("candidate_pool <= 0; using fallback paper samples without arXiv network access.")
-        return fallback_papers(topic, max_results), warnings, [], queries
+        if is_agent_memory_topic(topic):
+            warnings.append("candidate_pool <= 0; using fallback paper samples without arXiv network access.")
+            return fallback_papers(topic, max_results), warnings, [], queries
+        warnings.append(
+            "candidate_pool <= 0; offline fallback samples are only available for Agent Memory topics."
+        )
+        return [], warnings, [], queries
     all_candidates: Dict[str, Paper] = {}
     per_query = max(max_results, min(candidate_pool, 10))
 
@@ -217,8 +285,11 @@ def arxiv_search(
             )
         return accepted, warnings, rejected, queries
 
-    warnings.append("No arXiv candidates passed relevance filtering; using fallback paper samples.")
-    return fallback_papers(topic, max_results), warnings, rejected, queries
+    if is_agent_memory_topic(topic):
+        warnings.append("No arXiv candidates passed relevance filtering; using fallback paper samples.")
+        return fallback_papers(topic, max_results), warnings, rejected, queries
+    warnings.append("No arXiv candidates passed relevance filtering for this topic.")
+    return [], warnings, rejected, queries
 
 
 def parse_arxiv_response(xml_text: str) -> List[Paper]:
@@ -263,19 +334,25 @@ def score_paper_relevance(paper: Paper, topic: str) -> Paper:
     combined = f"{title} {summary}"
     score = 0.0
     matched_terms: List[str] = []
+    agent_memory_topic = is_agent_memory_topic(topic)
 
-    for phrase, weight in POSITIVE_PATTERNS.items():
-        if phrase in title:
-            score += weight * 1.4
-            matched_terms.append(phrase)
-        elif phrase in summary:
-            score += weight
-            matched_terms.append(phrase)
+    if agent_memory_topic:
+        for phrase, weight in POSITIVE_PATTERNS.items():
+            if phrase in title:
+                score += weight * 1.4
+                matched_terms.append(phrase)
+            elif phrase in summary:
+                score += weight
+                matched_terms.append(phrase)
 
-    if "agent" in combined and "memory" in combined:
+    if agent_memory_topic and "agent" in combined and "memory" in combined:
         score += 2.5
         matched_terms.append("agent+memory")
-    if ("llm" in combined or "large language model" in combined) and "memory" in combined:
+    if (
+        agent_memory_topic
+        and ("llm" in combined or "large language model" in combined)
+        and "memory" in combined
+    ):
         score += 1.5
         matched_terms.append("llm+memory")
 
@@ -286,12 +363,40 @@ def score_paper_relevance(paper: Paper, topic: str) -> Paper:
     }
     candidate_tokens = set(keyword_tokens(combined))
     overlap = sorted(topic_tokens & candidate_tokens)
-    score += min(len(overlap), 5) * 0.6
+    score += min(len(overlap), 5) * 1.2
     matched_terms.extend(overlap)
+    for token in topic_tokens:
+        if token in title:
+            score += 0.8
+        elif token in summary:
+            score += 0.35
 
     for phrase, penalty in NEGATIVE_PATTERNS.items():
         if phrase in combined:
             score -= penalty
+
+    if is_atmospheric_optics_topic(topic):
+        atmospheric_terms = {
+            "atmospheric",
+            "atmosphere",
+            "twilight",
+            "sky",
+            "skyglow",
+            "sunset",
+            "sunrise",
+            "aerosol",
+            "scattering",
+            "polarization",
+            "brightness",
+            "optical",
+            "optics",
+        }
+        atmospheric_overlap = sorted(atmospheric_terms & candidate_tokens)
+        if atmospheric_overlap:
+            score += min(len(atmospheric_overlap), 4) * 0.7
+            matched_terms.extend(atmospheric_overlap)
+        else:
+            score -= 3.0
 
     if paper.year.isdigit():
         year = int(paper.year)

@@ -7,7 +7,14 @@ from typing import Any, Dict, List
 
 from research_team.llm import BaseLLM
 from research_team.models import PaperAnalysis, ResearchState
-from research_team.tools import arxiv_search, extract_pdf_text, paper_stats
+from research_team.tools import (
+    arxiv_search,
+    extract_pdf_text,
+    is_agent_memory_topic,
+    is_atmospheric_optics_topic,
+    keyword_tokens,
+    paper_stats,
+)
 
 
 def add_message(state: ResearchState, speaker: str, content: str) -> None:
@@ -90,7 +97,7 @@ class ReadingAgent:
     def run(self, state: ResearchState, llm: BaseLLM) -> ResearchState:
         analyses: List[Dict[str, Any]] = []
         for paper in state.get("papers", []):
-            analyses.append(self._analyze_paper(paper, llm).to_dict())
+            analyses.append(self._analyze_paper(paper, state["topic"], llm).to_dict())
 
         pdf_notes: List[Dict[str, str]] = []
         for raw_path in state.get("pdf_paths", []):
@@ -135,24 +142,28 @@ class ReadingAgent:
         )
         return state
 
-    def _analyze_paper(self, paper: Dict[str, Any], llm: BaseLLM) -> PaperAnalysis:
+    def _analyze_paper(
+        self, paper: Dict[str, Any], topic: str, llm: BaseLLM
+    ) -> PaperAnalysis:
         if llm.mode != "mock":
-            llm_result = self._analyze_with_llm(paper, llm)
+            llm_result = self._analyze_with_llm(paper, topic, llm)
             if llm_result is not None:
                 return llm_result
-        return self._fallback_analyze_paper(paper)
+        return self._fallback_analyze_paper(paper, topic)
 
     def _analyze_with_llm(
-        self, paper: Dict[str, Any], llm: BaseLLM
+        self, paper: Dict[str, Any], topic: str, llm: BaseLLM
     ) -> PaperAnalysis | None:
         system_prompt = (
             "You are ReadingAgent. Extract only what is supported by the title and abstract. "
             "Return strict JSON with keys: contribution, method, limitations, tags, category. "
-            "category must be one of: 综述与分类, 长期记忆架构, 检索增强记忆, 反思与经验记忆, "
-            "安全隐私与评测, 其他相关方向. Use Chinese, concise wording."
+            "The category must describe the research direction for the user's topic, not a fixed domain. "
+            "Do not use Agent Memory, LLM agent, retrieval memory, or long-term memory categories unless "
+            "the title/abstract and user topic are actually about those concepts. Use Chinese, concise wording."
         )
         user_prompt = json.dumps(
             {
+                "user_topic": topic,
                 "title": paper.get("title", ""),
                 "year": paper.get("year", ""),
                 "abstract": paper.get("summary", ""),
@@ -173,6 +184,8 @@ class ReadingAgent:
             tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
         if not isinstance(tags, list):
             tags = []
+        if analysis_off_topic(data, topic):
+            return None
         return PaperAnalysis(
             title=paper.get("title", ""),
             year=str(paper.get("year", "unknown")),
@@ -180,22 +193,25 @@ class ReadingAgent:
             contribution=str(data.get("contribution", "")).strip()
             or first_sentence(paper.get("summary", "")),
             method=str(data.get("method", "")).strip()
-            or infer_method(paper.get("title", ""), paper.get("summary", "")),
+            or infer_method(paper.get("title", ""), paper.get("summary", ""), topic),
             limitations=str(data.get("limitations", "")).strip()
             or "仅基于摘要分析，尚需全文验证。",
-            tags=[str(tag) for tag in tags[:5]] or infer_tags(paper.get("title", "")),
+            tags=[str(tag) for tag in tags[:5]]
+            or infer_tags(paper.get("title", ""), topic),
             source=paper.get("source", "arxiv"),
             category=str(data.get("category", "")).strip()
-            or infer_category(paper.get("title", ""), paper.get("summary", "")),
+            or infer_category(paper.get("title", ""), paper.get("summary", ""), topic),
             relevance_score=float(paper.get("relevance_score", 0) or 0),
         )
 
-    def _fallback_analyze_paper(self, paper: Dict[str, Any]) -> PaperAnalysis:
+    def _fallback_analyze_paper(
+        self, paper: Dict[str, Any], topic: str
+    ) -> PaperAnalysis:
         title = paper.get("title", "")
         summary = paper.get("summary", "")
-        tags = infer_tags(title + " " + summary)
-        contribution = first_sentence(summary) or "The paper contributes to agent research."
-        method = infer_method(title, summary)
+        tags = infer_tags(title + " " + summary, topic)
+        contribution = first_sentence(summary) or "The paper contributes evidence related to the research topic."
+        method = infer_method(title, summary, topic)
         limitations = (
             "The abstract-level analysis may miss experimental details; full PDF reading "
             "is needed for stronger evidence."
@@ -209,7 +225,7 @@ class ReadingAgent:
             limitations=limitations,
             tags=tags,
             source=paper.get("source", "arxiv"),
-            category=infer_category(title, summary),
+            category=infer_category(title, summary, topic),
             relevance_score=float(paper.get("relevance_score", 0) or 0),
         )
 
@@ -218,6 +234,11 @@ class CriticAgent:
     name = "CriticAgent"
 
     def run(self, state: ResearchState, llm: BaseLLM) -> ResearchState:
+        if llm.mode == "mock":
+            critique = build_fallback_critique(state)
+            state["critique_summary"] = critique
+            add_message(state, self.name, critique)
+            return state
         system_prompt = (
             "You are CriticAgent. Use Reflection to identify limits and risks. "
             "Stay within the provided analyses; do not invent papers, tools, or experiments."
@@ -226,9 +247,10 @@ class CriticAgent:
             state.get("paper_analyses", []), ensure_ascii=False, indent=2
         )
         user_prompt = (
+            f"用户主题：{state.get('topic', '')}\n"
             "请基于以下结构化阅读结果做反思，输出不超过6条要点：\n"
             f"{analysis_payload}\n"
-            "角度：摘要证据不足、实验验证、长期记忆更新、隐私安全、应用落地。"
+            f"角度：{critic_angles_for_topic(state.get('topic', ''))}。"
         )
         critique = llm.invoke(system_prompt, user_prompt)
         state["critique_summary"] = critique
@@ -260,21 +282,47 @@ class WriterAgent:
         return state
 
 
-def infer_tags(text: str) -> List[str]:
+def infer_tags(text: str, topic: str = "") -> List[str]:
     lowered = text.lower()
     tags: List[str] = []
-    candidates = {
-        "long-term-memory": ["long-term", "persistent", "memorybank", "memgpt"],
-        "reflection": ["reflection", "reflexion", "feedback"],
-        "planning": ["planning", "plan"],
-        "retrieval": ["retrieval", "retrieve", "rag", "vector"],
-        "multi-agent": ["multi-agent", "agents", "generative agents"],
-        "benchmark": ["benchmark", "evaluation", "evaluate"],
-    }
+    if is_agent_memory_topic(topic):
+        candidates = {
+            "long-term-memory": ["long-term", "persistent", "memorybank", "memgpt"],
+            "reflection": ["reflection", "reflexion", "feedback"],
+            "planning": ["planning", "plan"],
+            "retrieval": ["retrieval", "retrieve", "rag", "vector"],
+            "multi-agent": ["multi-agent", "agents", "generative agents"],
+            "benchmark": ["benchmark", "evaluation", "evaluate"],
+        }
+    elif is_atmospheric_optics_topic(topic):
+        candidates = {
+            "twilight-sky": ["twilight", "sunset", "sunrise"],
+            "atmospheric-optics": ["atmospheric", "optical", "optics"],
+            "aerosol": ["aerosol", "dust", "turbidity"],
+            "scattering": ["scattering", "multiple scattering"],
+            "polarization": ["polarization", "polarimetry"],
+            "sky-brightness": ["sky brightness", "skyglow", "light pollution"],
+        }
+    else:
+        candidates = {
+            "survey": ["survey", "review", "taxonomy"],
+            "measurement": ["measurement", "observations", "observing"],
+            "modeling": ["model", "modelling", "simulation"],
+            "benchmark": ["benchmark", "evaluation", "dataset"],
+            "application": ["application", "system", "framework"],
+            "method": ["method", "algorithm", "approach"],
+        }
     for tag, keywords in candidates.items():
         if any(keyword in lowered for keyword in keywords):
             tags.append(tag)
-    return tags or ["agent-memory"]
+    if tags:
+        return tags
+    generic = [
+        token
+        for token in keyword_tokens(text)
+        if token not in {"paper", "study", "research", "result", "results"}
+    ]
+    return generic[:4] or ["topic-related"]
 
 
 def safe_manager_plan(plan: str, state: ResearchState) -> str:
@@ -313,14 +361,36 @@ def build_safe_manager_plan(state: ResearchState) -> str:
             "2. SearchAgent使用arXiv检索式和本地相关性评分筛选候选论文。",
             pdf_step,
             "4. ReadingAgent提取每篇论文的贡献、方法、局限、标签和方向分类。",
-            "5. CriticAgent只基于已提取材料做Reflection，指出证据不足、评测和隐私风险。",
+            "5. CriticAgent只基于已提取材料做Reflection，指出证据不足、方法局限和应用边界。",
             "6. WriterAgent生成survey.md、mindmap.md、run_log.json，并更新JSON长期记忆。",
         ]
     )
 
 
-def infer_category(title: str, summary: str) -> str:
+def infer_category(title: str, summary: str, topic: str = "") -> str:
     text = f"{title} {summary}".lower()
+    if is_atmospheric_optics_topic(topic):
+        if "skyglow" in text or "sky brightness" in text or "light pollution" in text:
+            return "天空亮度与光污染"
+        if "aerosol" in text or "scattering" in text or "polarization" in text:
+            return "气溶胶、散射与偏振观测"
+        if "twilight" in text or "sunset" in text or "sunrise" in text:
+            return "暮光/霞光大气光学"
+        if "instrument" in text or "observing program" in text or "telescope" in text:
+            return "观测仪器与应用"
+        return "大气光学相关研究"
+    if not is_agent_memory_topic(topic):
+        if "survey" in text or "review" in text or "taxonomy" in text:
+            return "综述与分类"
+        if "dataset" in text or "benchmark" in text or "evaluation" in text:
+            return "数据集与评测"
+        if "model" in text or "simulation" in text or "modelling" in text:
+            return "建模与方法"
+        if "observation" in text or "measurement" in text or "observing" in text:
+            return "观测与测量"
+        if "application" in text or "system" in text or "framework" in text:
+            return "系统与应用"
+        return "相关研究"
     if "survey" in text or "taxonomy" in text:
         return "综述与分类"
     if "privacy" in text or "attack" in text or "risk" in text or "benchmark" in text:
@@ -334,8 +404,28 @@ def infer_category(title: str, summary: str) -> str:
     return "其他相关方向"
 
 
-def infer_method(title: str, summary: str) -> str:
+def infer_method(title: str, summary: str, topic: str = "") -> str:
     text = f"{title} {summary}".lower()
+    if is_atmospheric_optics_topic(topic):
+        if "polarization" in text or "polarimetry" in text:
+            return "Twilight sky polarization or polarimetry measurements."
+        if "aerosol" in text or "scattering" in text:
+            return "Atmospheric aerosol and scattering analysis from sky observations."
+        if "sky brightness" in text or "skyglow" in text or "light pollution" in text:
+            return "Sky brightness or skyglow measurement and modelling."
+        if "observing program" in text or "instrument" in text:
+            return "Astronomical twilight observing program or instrument use."
+        return "Atmospheric-optics observation and analysis."
+    if not is_agent_memory_topic(topic):
+        if "survey" in text or "review" in text:
+            return "Literature review and synthesis."
+        if "measurement" in text or "observ" in text:
+            return "Empirical observation and measurement."
+        if "model" in text or "simulation" in text or "modelling" in text:
+            return "Computational or statistical modelling."
+        if "dataset" in text or "benchmark" in text:
+            return "Dataset or benchmark construction and evaluation."
+        return "Topic-specific method inferred from title and abstract."
     if "survey" in text:
         return "Survey and taxonomy construction."
     if "reflection" in text or "reflexion" in text:
@@ -347,6 +437,56 @@ def infer_method(title: str, summary: str) -> str:
     if "context" in text or "memgpt" in text:
         return "Virtual context management between short-term and long-term storage."
     return "LLM-agent memory mechanism analysis."
+
+
+def analysis_off_topic(data: Dict[str, Any], topic: str) -> bool:
+    if is_agent_memory_topic(topic):
+        return False
+    text = " ".join(
+        str(data.get(key, "")) for key in ["category", "method", "contribution", "tags"]
+    ).lower()
+    forbidden = [
+        "agent memory",
+        "llm-agent memory",
+        "long-term memory",
+        "retrieval memory",
+        "memory mechanism",
+        "智能体记忆",
+        "长期记忆架构",
+        "检索增强记忆",
+        "反思与经验记忆",
+    ]
+    return any(term in text for term in forbidden)
+
+
+def critic_angles_for_topic(topic: str) -> str:
+    if is_agent_memory_topic(topic):
+        return "摘要证据不足、实验验证、长期记忆更新、隐私安全、应用落地"
+    if is_atmospheric_optics_topic(topic):
+        return "摘要证据不足、观测地点和时间覆盖、仪器与校准、气溶胶/散射条件、模型可复现性、应用边界"
+    return "摘要证据不足、方法和数据覆盖、实验或观测验证、可复现性、局限性、应用边界"
+
+
+def build_fallback_critique(state: ResearchState) -> str:
+    analyses = state.get("paper_analyses", [])
+    topic = state.get("topic", "")
+    if not analyses:
+        return "反思：本轮没有足够高相关论文进入正文分析，应调整关键词、降低阈值或补充本地PDF后再总结。"
+    if is_agent_memory_topic(topic):
+        return (
+            "反思：现有论文通常存在评测场景有限、长期记忆更新策略不统一、"
+            "隐私与遗忘机制讨论不足等问题。"
+        )
+    if is_atmospheric_optics_topic(topic):
+        return (
+            "反思：本轮结果主要依赖标题和摘要，霞光/暮光相关研究常受观测地点、季节、"
+            "气溶胶条件、仪器校准和波段选择影响；摘要级分析难以判断数据覆盖范围、"
+            "散射模型假设和观测可复现性，后续应优先阅读全文方法与观测设置。"
+        )
+    return (
+        "反思：本轮结果主要基于摘要和元数据，方法细节、数据覆盖、实验设置和可复现性"
+        "仍需全文验证；如果论文数量较少，应补充关键词或本地PDF。"
+    )
 
 
 def first_sentence(text: str) -> str:
