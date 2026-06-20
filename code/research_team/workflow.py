@@ -1,0 +1,158 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Callable, List
+
+from research_team.agents import (
+    CriticAgent,
+    ManagerAgent,
+    ReadingAgent,
+    SearchAgent,
+    WriterAgent,
+    add_message,
+)
+from research_team.llm import build_llm
+from research_team.memory import LongTermMemory
+from research_team.models import ResearchState
+
+
+def run_research_workflow(
+    topic: str,
+    max_papers: int,
+    pdf_paths: List[Path],
+    output_dir: Path,
+    memory_path: Path,
+    mock_mode: str = "auto",
+) -> ResearchState:
+    llm, llm_warnings = build_llm(mock_mode)
+    state: ResearchState = {
+        "topic": topic,
+        "max_papers": max_papers,
+        "pdf_paths": [str(path) for path in pdf_paths],
+        "output_dir": str(output_dir),
+        "memory_path": str(memory_path),
+        "messages": [],
+        "tool_logs": [],
+        "warnings": llm_warnings,
+        "retrieved_memories": [],
+        "papers": [],
+        "paper_analyses": [],
+        "pdf_notes": [],
+        "llm_mode": llm.mode,
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    add_message(state, "System", "Start Research Agent Team workflow.")
+
+    memory = LongTermMemory(memory_path)
+    agents = {
+        "manager": ManagerAgent(),
+        "search": SearchAgent(),
+        "read": ReadingAgent(),
+        "critique": CriticAgent(),
+        "write": WriterAgent(),
+    }
+
+    def manager_node(current: ResearchState) -> ResearchState:
+        return agents["manager"].run(current, llm)
+
+    def memory_retrieve_node(current: ResearchState) -> ResearchState:
+        retrieved = memory.retrieve(current["topic"])
+        current["retrieved_memories"] = retrieved
+        current.setdefault("tool_logs", []).append(
+            {"tool": "memory_retrieve", "memory_count": len(retrieved)}
+        )
+        add_message(
+            current,
+            "Memory",
+            f"Retrieved {len(retrieved)} related long-term memory entries.",
+        )
+        return current
+
+    def search_node(current: ResearchState) -> ResearchState:
+        return agents["search"].run(current, llm)
+
+    def read_node(current: ResearchState) -> ResearchState:
+        return agents["read"].run(current, llm)
+
+    def critique_node(current: ResearchState) -> ResearchState:
+        return agents["critique"].run(current, llm)
+
+    def write_node(current: ResearchState) -> ResearchState:
+        return agents["write"].run(current, llm)
+
+    def memory_update_node(current: ResearchState) -> ResearchState:
+        memory.add_run(
+            topic=current["topic"],
+            papers=current.get("papers", []),
+            analyses=current.get("paper_analyses", []),
+            report_path=current.get("report_path", ""),
+        )
+        current.setdefault("tool_logs", []).append(
+            {"tool": "memory_update", "memory_path": str(memory_path)}
+        )
+        add_message(current, "Memory", "Updated long-term memory.")
+        return current
+
+    nodes = [
+        ("manager", manager_node),
+        ("memory_retrieve", memory_retrieve_node),
+        ("search", search_node),
+        ("read", read_node),
+        ("critique", critique_node),
+        ("write", write_node),
+        ("memory_update", memory_update_node),
+    ]
+
+    state = run_with_langgraph_if_available(state, nodes)
+    state["completed_at"] = datetime.now().isoformat(timespec="seconds")
+    write_run_log(state)
+    return state
+
+
+def run_with_langgraph_if_available(
+    state: ResearchState, nodes: List[tuple[str, Callable[[ResearchState], ResearchState]]]
+) -> ResearchState:
+    try:
+        from langgraph.graph import END, StateGraph
+    except Exception:
+        state.setdefault("warnings", []).append(
+            "LangGraph is not installed; executed the same workflow sequentially."
+        )
+        state["workflow_engine"] = "sequential-fallback"
+        for _, node in nodes:
+            state = node(state)
+        return state
+
+    try:
+        graph = StateGraph(ResearchState)
+        for name, node in nodes:
+            graph.add_node(name, node)
+        for (name, _), (next_name, _) in zip(nodes, nodes[1:]):
+            graph.add_edge(name, next_name)
+        graph.add_edge(nodes[-1][0], END)
+        graph.set_entry_point(nodes[0][0])
+        app = graph.compile()
+        final_state = app.invoke(state)
+        final_state["workflow_engine"] = "langgraph"
+        return final_state
+    except Exception as exc:
+        state.setdefault("warnings", []).append(
+            f"LangGraph execution failed ({exc}); executed sequential fallback."
+        )
+        state["workflow_engine"] = "sequential-fallback"
+        for _, node in nodes:
+            state = node(state)
+        return state
+
+
+def write_run_log(state: ResearchState) -> None:
+    output_dir = Path(state.get("output_dir", "outputs"))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log_path = output_dir / "run_log.json"
+    state["run_log_path"] = str(log_path)
+    log_path.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )

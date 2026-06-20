@@ -1,0 +1,42 @@
+[
+  {
+    "id": "run-20260620-113224",
+    "timestamp": "2026-06-20T11:32:24",
+    "topic": "近年来Agent Memory有哪些研究方向？",
+    "papers": [
+      {
+        "title": "A Survey on the Memory Mechanism of Large Language Model based Agents",
+        "year": "2024",
+        "url": "https://arxiv.org/abs/2404.13501"
+      },
+      {
+        "title": "Generative Agents: Interactive Simulacra of Human Behavior",
+        "year": "2023",
+        "url": "https://arxiv.org/abs/2304.03442"
+      },
+      {
+        "title": "Reflexion: Language Agents with Verbal Reinforcement Learning",
+        "year": "2023",
+        "url": "https://arxiv.org/abs/2303.11366"
+      },
+      {
+        "title": "MemGPT: Towards LLMs as Operating Systems",
+        "year": "2023",
+        "url": "https://arxiv.org/abs/2310.08560"
+      },
+      {
+        "title": "MemoryBank: Enhancing Large Language Models with Long-Term Memory",
+        "year": "2023",
+        "url": "https://arxiv.org/abs/2305.10250"
+      }
+    ],
+    "tags": [
+      "long-term-memory",
+      "multi-agent",
+      "planning",
+      "reflection",
+      "retrieval"
+    ],
+    "report_path": "outputs\\survey.md"
+  }
+]

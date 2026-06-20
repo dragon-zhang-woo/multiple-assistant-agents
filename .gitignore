@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+.pytest_cache/
+
+# Course materials and provided examples are local references only.
+AgentLab/
+1_AgentLab(1).zip
+7-Agent-lab(1).pdf
