@@ -17,9 +17,12 @@ mindmap
       PDF读取
       统计分析
     研究主题
-      A Survey on the Memory Mechanism of Large Langua
-      Generative Agents: Interactive Simulacra of Huma
-      Reflexion: Language Agents with Verbal Reinforce
-      MemGPT: Towards LLMs as Operating Systems
-      MemoryBank: Enhancing Large Language Models with
+      综述与分类
+        A Survey on the Memory Mechanism of Large Langua
+      反思与经验记忆
+        Generative Agents: Interactive Simulacra of Huma
+        Reflexion: Language Agents with Verbal Reinforce
+      检索增强记忆
+        MemGPT: Towards LLMs as Operating Systems
+        MemoryBank: Enhancing Large Language Models with
 ```

@@ -30,25 +30,61 @@ python code/main.py --topic "近年来Agent Memory有哪些研究方向？" --ma
 python code/main.py --topic "Agent Memory综述" --pdf "7-Agent-lab(1).pdf" --mock auto
 ```
 
+真实 DeepSeek 模型模式：
+
+```powershell
+$env:DEEPSEEK_API_KEY="your_key_here"
+.\.venv\Scripts\python code\main.py --provider deepseek --topic "近年来Agent Memory有哪些研究方向？" --max-papers 5 --mock never
+```
+
 真实 DashScope/Qwen 模型模式：
 
+```powershell
+$env:DASHSCOPE_API_KEY="your_key_here"
+.\.venv\Scripts\python code\main.py --provider dashscope --topic "近年来Agent Memory有哪些研究方向？" --max-papers 5 --mock never
+```
+
+检索质量参数：
+
 ```bash
-set DASHSCOPE_API_KEY=your_key_here
-python code/main.py --topic "近年来Agent Memory有哪些研究方向？" --max-papers 5 --mock never
+python code/main.py --topic "近年来Agent Memory有哪些研究方向？" --candidate-pool 30 --min-relevance 3.5 --sort relevance
+```
+
+离线稳定样例：
+
+```bash
+python code/main.py --topic "近年来Agent Memory有哪些研究方向？" --candidate-pool 0 --mock always
+```
+
+查看配置但不运行：
+
+```bash
+python code/main.py --dry-run-config --provider deepseek --mock never
 ```
 
 可选环境变量：
 
+- `DEEPSEEK_API_KEY`：DeepSeek API 密钥。
+- `DEEPSEEK_MODEL`：默认 `deepseek-v4-flash`。
+- `DEEPSEEK_BASE_URL`：默认 `https://api.deepseek.com`。
 - `DASHSCOPE_API_KEY`：真实模型调用密钥。
 - `DASHSCOPE_MODEL`：默认 `qwen-turbo`。
 - `DASHSCOPE_BASE_URL`：默认 `https://dashscope.aliyuncs.com/compatible-mode/v1`。
 
+Provider 选择：
+
+- `--provider auto`：优先使用 `DEEPSEEK_API_KEY`，其次使用 `DASHSCOPE_API_KEY`，都没有则按 `--mock` 策略兜底。
+- `--provider deepseek`：只使用 DeepSeek。
+- `--provider dashscope`：只使用 DashScope/Qwen。
+
 ## 输出文件
 
-- `outputs/survey.md`：调研报告。
-- `outputs/mindmap.md`：Mermaid 思维导图。
-- `outputs/run_log.json`：完整运行状态、工具日志和 warning。
-- `data/long_term_memory.json`：长期记忆库。
+- `runs/<timestamp>/survey.md`：调研报告。
+- `runs/<timestamp>/mindmap.md`：Mermaid 思维导图。
+- `runs/<timestamp>/run_log.json`：完整运行状态、工具日志和 warning。
+- `outputs/latest/`：最近一次运行副本，默认被 git 忽略。
+- `memory/long_term_memory.json`：长期记忆库，默认被 git 忽略。
+- `examples/sample_run/`：仓库内提交的稳定样例输出。
 
 ## 目录说明
 

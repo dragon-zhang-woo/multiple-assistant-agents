@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import hashlib
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -45,23 +46,36 @@ class LongTermMemory:
         paper_list = list(papers)
         analysis_list = list(analyses)
         tags = sorted({tag for item in analysis_list for tag in item.get("tags", [])})
-        self.entries.append(
-            {
-                "id": f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
-                "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "topic": topic,
-                "papers": [
-                    {
-                        "title": paper.get("title", ""),
-                        "year": paper.get("year", ""),
-                        "url": paper.get("url", ""),
-                    }
-                    for paper in paper_list
-                ],
-                "tags": tags,
-                "report_path": report_path,
-            }
+        fingerprint = run_fingerprint(topic, paper_list)
+        entry = {
+            "id": f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "fingerprint": fingerprint,
+            "topic": topic,
+            "papers": [
+                {
+                    "title": paper.get("title", ""),
+                    "year": paper.get("year", ""),
+                    "url": paper.get("url", ""),
+                }
+                for paper in paper_list
+            ],
+            "tags": tags,
+            "report_path": report_path,
+        }
+        existing_index = next(
+            (
+                index
+                for index, existing in enumerate(self.entries)
+                if existing.get("fingerprint") == fingerprint
+            ),
+            None,
         )
+        if existing_index is None:
+            self.entries.append(entry)
+        else:
+            entry["id"] = self.entries[existing_index].get("id", entry["id"])
+            self.entries[existing_index] = entry
         self._save()
 
     def _load(self) -> List[Dict[str, Any]]:
@@ -96,3 +110,10 @@ def cosine(left: Counter, right: Counter) -> float:
     if left_norm == 0 or right_norm == 0:
         return 0.0
     return numerator / (left_norm * right_norm)
+
+
+def run_fingerprint(topic: str, papers: Iterable[Dict[str, Any]]) -> str:
+    normalized_topic = " ".join(topic.lower().split())
+    urls = sorted(paper.get("url", "") or paper.get("title", "") for paper in papers)
+    raw = json.dumps([normalized_topic, urls], ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]

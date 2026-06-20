@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, List
@@ -21,23 +22,36 @@ from research_team.models import ResearchState
 def run_research_workflow(
     topic: str,
     max_papers: int,
+    candidate_pool: int,
+    min_relevance: float,
+    sort_by: str,
     pdf_paths: List[Path],
     output_dir: Path,
     memory_path: Path,
     mock_mode: str = "auto",
+    provider: str = "auto",
+    run_name: str = "",
+    latest_dir: Path | None = None,
 ) -> ResearchState:
-    llm, llm_warnings = build_llm(mock_mode)
+    llm, llm_warnings = build_llm(mock_mode, provider)
     state: ResearchState = {
         "topic": topic,
         "max_papers": max_papers,
+        "candidate_pool": candidate_pool,
+        "min_relevance": min_relevance,
+        "sort_by": sort_by,
         "pdf_paths": [str(path) for path in pdf_paths],
         "output_dir": str(output_dir),
         "memory_path": str(memory_path),
+        "run_name": run_name,
+        "latest_dir": str(latest_dir) if latest_dir else "",
         "messages": [],
         "tool_logs": [],
         "warnings": llm_warnings,
         "retrieved_memories": [],
         "papers": [],
+        "rejected_papers": [],
+        "search_queries": [],
         "paper_analyses": [],
         "pdf_notes": [],
         "llm_mode": llm.mode,
@@ -108,6 +122,8 @@ def run_research_workflow(
     state = run_with_langgraph_if_available(state, nodes)
     state["completed_at"] = datetime.now().isoformat(timespec="seconds")
     write_run_log(state)
+    if latest_dir:
+        publish_latest(Path(state["output_dir"]), latest_dir)
     return state
 
 
@@ -134,6 +150,7 @@ def run_with_langgraph_if_available(
         graph.add_edge(nodes[-1][0], END)
         graph.set_entry_point(nodes[0][0])
         app = graph.compile()
+        state["workflow_engine"] = "langgraph"
         final_state = app.invoke(state)
         final_state["workflow_engine"] = "langgraph"
         return final_state
@@ -156,3 +173,10 @@ def write_run_log(state: ResearchState) -> None:
         json.dumps(state, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def publish_latest(output_dir: Path, latest_dir: Path) -> None:
+    latest_dir.parent.mkdir(parents=True, exist_ok=True)
+    if latest_dir.exists():
+        shutil.rmtree(latest_dir)
+    shutil.copytree(output_dir, latest_dir)
