@@ -2,53 +2,53 @@
   "topic": "近年来Agent Memory有哪些研究方向？",
   "max_papers": 5,
   "pdf_paths": [],
-  "output_dir": "outputs",
-  "memory_path": "data\\long_term_memory.json",
+  "output_dir": "examples\\sample_run",
+  "memory_path": "examples\\sample_run\\long_term_memory.json",
   "messages": [
     {
       "speaker": "System",
       "content": "Start Research Agent Team workflow.",
-      "timestamp": "2026-06-20T11:32:22"
+      "timestamp": "2026-06-20T12:34:42"
     },
     {
       "speaker": "ManagerAgent",
-      "content": "Planning result: 1. 明确研究问题与关键词；2. 检索候选论文；3. 阅读摘要和PDF片段；4. 提取贡献、方法和证据；5. 反思局限；6. 输出调研报告和思维导图。",
-      "timestamp": "2026-06-20T11:32:22"
+      "content": "Planning result: 1. 明确研究问题与关键词；2. 使用arXiv检索并过滤候选论文；3. 阅读摘要和可选本地PDF片段；4. 提取贡献、方法、方向分类和证据；5. 反思局限与风险；6. 生成报告、思维导图和长期记忆更新。",
+      "timestamp": "2026-06-20T12:34:44"
     },
     {
       "speaker": "Memory",
       "content": "Retrieved 0 related long-term memory entries.",
-      "timestamp": "2026-06-20T11:32:22"
+      "timestamp": "2026-06-20T12:34:44"
     },
     {
       "speaker": "SearchAgent",
       "content": "Thought: need recent papers for '近年来Agent Memory有哪些研究方向？'. Action: arxiv_search.",
-      "timestamp": "2026-06-20T11:32:22"
+      "timestamp": "2026-06-20T12:34:44"
     },
     {
       "speaker": "SearchAgent",
       "content": "Observe: retrieved 5 papers. Summarize: candidates are ready for ReadingAgent.",
-      "timestamp": "2026-06-20T11:32:24"
+      "timestamp": "2026-06-20T12:34:44"
     },
     {
       "speaker": "ReadingAgent",
       "content": "Read 5 paper abstracts and 0 local PDFs.",
-      "timestamp": "2026-06-20T11:32:24"
+      "timestamp": "2026-06-20T12:34:44"
     },
     {
       "speaker": "CriticAgent",
       "content": "反思：现有论文通常存在评测场景有限、长期记忆更新策略不统一、隐私与遗忘机制讨论不足等问题。",
-      "timestamp": "2026-06-20T11:32:24"
+      "timestamp": "2026-06-20T12:34:44"
     },
     {
       "speaker": "WriterAgent",
       "content": "Wrote survey.md and mindmap.md.",
-      "timestamp": "2026-06-20T11:32:24"
+      "timestamp": "2026-06-20T12:34:44"
     },
     {
       "speaker": "Memory",
       "content": "Updated long-term memory.",
-      "timestamp": "2026-06-20T11:32:24"
+      "timestamp": "2026-06-20T12:34:44"
     }
   ],
   "tool_logs": [
@@ -59,9 +59,17 @@
     {
       "tool": "arxiv_search",
       "query": "近年来Agent Memory有哪些研究方向？",
+      "expanded_queries": [
+        "all:\"agent memory\"",
+        "(ti:\"agent memory\" OR abs:\"agent memory\" OR ti:\"memory augmented agent\" OR abs:\"memory augmented agent\")",
+        "(all:\"LLM agent\" AND all:\"memory\")",
+        "(all:\"long-term memory\" AND all:\"agent\")"
+      ],
       "paper_count": 5,
+      "rejected_count": 0,
+      "min_relevance": 3.0,
       "warnings": [
-        "arXiv search failed (429 Client Error: Unknown Error for url: https://export.arxiv.org/api/query?search_query=all%3Aagent+memory+large+language+model&start=0&max_results=5&sortBy=submittedDate&sortOrder=descending); using fallback paper samples."
+        "candidate_pool <= 0; using fallback paper samples without arXiv network access."
       ]
     },
     {
@@ -105,18 +113,17 @@
             "keyword": "context",
             "count": 2
           }
-        ]
+        ],
+        "average_relevance": 6.4
       }
     },
     {
       "tool": "memory_update",
-      "memory_path": "data\\long_term_memory.json"
+      "memory_path": "examples\\sample_run\\long_term_memory.json"
     }
   ],
   "warnings": [
-    "DASHSCOPE_API_KEY is not set; using deterministic mock LLM.",
-    "LangGraph is not installed; executed the same workflow sequentially.",
-    "arXiv search failed (429 Client Error: Unknown Error for url: https://export.arxiv.org/api/query?search_query=all%3Aagent+memory+large+language+model&start=0&max_results=5&sortBy=submittedDate&sortOrder=descending); using fallback paper samples."
+    "candidate_pool <= 0; using fallback paper samples without arXiv network access."
   ],
   "retrieved_memories": [],
   "papers": [
@@ -129,7 +136,14 @@
       "summary": "This survey summarizes memory modules for LLM agents, including working memory, episodic memory, semantic memory, retrieval, and reflection-driven consolidation.",
       "url": "https://arxiv.org/abs/2404.13501",
       "pdf_url": "https://arxiv.org/pdf/2404.13501",
-      "source": "fallback"
+      "source": "fallback",
+      "relevance_score": 8.0,
+      "matched_terms": [
+        "survey",
+        "agent memory",
+        "reflection",
+        "retrieval"
+      ]
     },
     {
       "title": "Generative Agents: Interactive Simulacra of Human Behavior",
@@ -142,7 +156,13 @@
       "summary": "The paper introduces generative agents with memory streams, reflection, and planning to produce believable long-horizon behavior.",
       "url": "https://arxiv.org/abs/2304.03442",
       "pdf_url": "https://arxiv.org/pdf/2304.03442",
-      "source": "fallback"
+      "source": "fallback",
+      "relevance_score": 6.5,
+      "matched_terms": [
+        "generative agents",
+        "reflection",
+        "planning"
+      ]
     },
     {
       "title": "Reflexion: Language Agents with Verbal Reinforcement Learning",
@@ -155,7 +175,13 @@
       "summary": "Reflexion lets language agents store verbal feedback from previous attempts and reuse it as memory for future decision making.",
       "url": "https://arxiv.org/abs/2303.11366",
       "pdf_url": "https://arxiv.org/pdf/2303.11366",
-      "source": "fallback"
+      "source": "fallback",
+      "relevance_score": 6.0,
+      "matched_terms": [
+        "reflexion",
+        "feedback",
+        "memory"
+      ]
     },
     {
       "title": "MemGPT: Towards LLMs as Operating Systems",
@@ -168,7 +194,13 @@
       "summary": "MemGPT proposes virtual context management that moves information between limited context windows and longer-term storage.",
       "url": "https://arxiv.org/abs/2310.08560",
       "pdf_url": "https://arxiv.org/pdf/2310.08560",
-      "source": "fallback"
+      "source": "fallback",
+      "relevance_score": 6.0,
+      "matched_terms": [
+        "memgpt",
+        "long-term memory",
+        "context"
+      ]
     },
     {
       "title": "MemoryBank: Enhancing Large Language Models with Long-Term Memory",
@@ -179,8 +211,20 @@
       "summary": "MemoryBank explores persistent user-level memory, forgetting, and retrieval to improve personalized LLM interactions.",
       "url": "https://arxiv.org/abs/2305.10250",
       "pdf_url": "https://arxiv.org/pdf/2305.10250",
-      "source": "fallback"
+      "source": "fallback",
+      "relevance_score": 5.5,
+      "matched_terms": [
+        "memorybank",
+        "long-term memory"
+      ]
     }
+  ],
+  "rejected_papers": [],
+  "search_queries": [
+    "all:\"agent memory\"",
+    "(ti:\"agent memory\" OR abs:\"agent memory\" OR ti:\"memory augmented agent\" OR abs:\"memory augmented agent\")",
+    "(all:\"LLM agent\" AND all:\"memory\")",
+    "(all:\"long-term memory\" AND all:\"agent\")"
   ],
   "paper_analyses": [
     {
@@ -195,7 +239,9 @@
         "retrieval",
         "multi-agent"
       ],
-      "source": "fallback"
+      "source": "fallback",
+      "category": "综述与分类",
+      "relevance_score": 8.0
     },
     {
       "title": "Generative Agents: Interactive Simulacra of Human Behavior",
@@ -209,7 +255,9 @@
         "planning",
         "multi-agent"
       ],
-      "source": "fallback"
+      "source": "fallback",
+      "category": "反思与经验记忆",
+      "relevance_score": 6.5
     },
     {
       "title": "Reflexion: Language Agents with Verbal Reinforcement Learning",
@@ -222,7 +270,9 @@
         "reflection",
         "multi-agent"
       ],
-      "source": "fallback"
+      "source": "fallback",
+      "category": "反思与经验记忆",
+      "relevance_score": 6.0
     },
     {
       "title": "MemGPT: Towards LLMs as Operating Systems",
@@ -235,7 +285,9 @@
         "long-term-memory",
         "retrieval"
       ],
-      "source": "fallback"
+      "source": "fallback",
+      "category": "检索增强记忆",
+      "relevance_score": 6.0
     },
     {
       "title": "MemoryBank: Enhancing Large Language Models with Long-Term Memory",
@@ -248,15 +300,12 @@
         "long-term-memory",
         "retrieval"
       ],
-      "source": "fallback"
+      "source": "fallback",
+      "category": "检索增强记忆",
+      "relevance_score": 5.5
     }
   ],
   "pdf_notes": [],
-  "llm_mode": "mock",
-  "started_at": "2026-06-20T11:32:22",
-  "workflow_engine": "sequential-fallback",
-  "plan": "1. 明确研究问题与关键词；2. 检索候选论文；3. 阅读摘要和PDF片段；4. 提取贡献、方法和证据；5. 反思局限；6. 输出调研报告和思维导图。",
-  "critique_summary": "反思：现有论文通常存在评测场景有限、长期记忆更新策略不统一、隐私与遗忘机制讨论不足等问题。",
   "stats": {
     "paper_count": 5,
     "year_distribution": {
@@ -296,10 +345,21 @@
         "keyword": "context",
         "count": 2
       }
-    ]
+    ],
+    "average_relevance": 6.4
   },
-  "report_path": "outputs\\survey.md",
-  "mindmap_path": "outputs\\mindmap.md",
-  "completed_at": "2026-06-20T11:32:24",
-  "run_log_path": "outputs\\run_log.json"
+  "plan": "1. 明确研究问题与关键词；2. 使用arXiv检索并过滤候选论文；3. 阅读摘要和可选本地PDF片段；4. 提取贡献、方法、方向分类和证据；5. 反思局限与风险；6. 生成报告、思维导图和长期记忆更新。",
+  "critique_summary": "反思：现有论文通常存在评测场景有限、长期记忆更新策略不统一、隐私与遗忘机制讨论不足等问题。",
+  "report_path": "examples\\sample_run\\survey.md",
+  "mindmap_path": "examples\\sample_run\\mindmap.md",
+  "latest_dir": "outputs\\latest",
+  "workflow_engine": "langgraph",
+  "llm_mode": "mock",
+  "candidate_pool": 0,
+  "min_relevance": 3.0,
+  "sort_by": "relevance",
+  "run_name": "sample_agent_memory",
+  "started_at": "2026-06-20T12:34:42",
+  "completed_at": "2026-06-20T12:34:44",
+  "run_log_path": "examples\\sample_run\\run_log.json"
 }

@@ -19,9 +19,9 @@ class MockResearchLLM(BaseLLM):
         prompt = f"{system_prompt}\n{user_prompt}".lower()
         if "manager" in prompt or "任务拆解" in prompt:
             return (
-                "1. 明确研究问题与关键词；2. 检索候选论文；"
-                "3. 阅读摘要和PDF片段；4. 提取贡献、方法和证据；"
-                "5. 反思局限；6. 输出调研报告和思维导图。"
+                "1. 明确研究问题与关键词；2. 使用arXiv检索并过滤候选论文；"
+                "3. 阅读摘要和可选本地PDF片段；4. 提取贡献、方法、方向分类和证据；"
+                "5. 反思局限与风险；6. 生成报告、思维导图和长期记忆更新。"
             )
         if "critic" in prompt or "reflection" in prompt:
             return (

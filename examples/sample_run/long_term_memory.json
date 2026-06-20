@@ -1,7 +1,8 @@
 [
   {
-    "id": "run-20260620-113224",
-    "timestamp": "2026-06-20T11:32:24",
+    "id": "run-20260620-123444",
+    "timestamp": "2026-06-20T12:34:44",
+    "fingerprint": "d31fb717a72b2b6b",
     "topic": "近年来Agent Memory有哪些研究方向？",
     "papers": [
       {
@@ -37,6 +38,6 @@
       "reflection",
       "retrieval"
     ],
-    "report_path": "outputs\\survey.md"
+    "report_path": "examples\\sample_run\\survey.md"
   }
 ]

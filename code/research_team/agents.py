@@ -24,10 +24,16 @@ class ManagerAgent:
     name = "ManagerAgent"
 
     def run(self, state: ResearchState, llm: BaseLLM) -> ResearchState:
-        system_prompt = "You are ManagerAgent. Use Planning and CoT style task decomposition."
+        system_prompt = (
+            "You are ManagerAgent for a runnable course project. Use concise Planning. "
+            "Only mention implemented capabilities: arXiv search, local PDF extraction, "
+            "paper statistics, JSON long-term memory, LangGraph workflow, and Markdown output. "
+            "Do not mention Google Scholar, Semantic Scholar, Chroma, FAISS, Neo4j, citation APIs, "
+            "parallel crawling, or any unimplemented tool."
+        )
         user_prompt = (
             f"请为科研问题制定多Agent调研计划：{state['topic']}。"
-            "要求覆盖检索、阅读、反思、写作、记忆更新。"
+            "要求用6条以内覆盖检索、阅读、反思、写作、记忆更新；不要写理想系统能力。"
         )
         plan = llm.invoke(system_prompt, user_prompt)
         state["plan"] = plan
@@ -45,15 +51,26 @@ class SearchAgent:
             self.name,
             f"Thought: need recent papers for '{topic}'. Action: arxiv_search.",
         )
-        papers, warnings = arxiv_search(topic, state.get("max_papers", 5))
+        papers, warnings, rejected, queries = arxiv_search(
+            topic=topic,
+            max_results=state.get("max_papers", 5),
+            candidate_pool=state.get("candidate_pool", 25),
+            min_relevance=state.get("min_relevance", 3.0),
+            sort_by=state.get("sort_by", "relevance"),
+        )
         state.setdefault("warnings", []).extend(warnings)
         paper_dicts = [paper.to_dict() for paper in papers]
         state["papers"] = paper_dicts
+        state["rejected_papers"] = rejected
+        state["search_queries"] = queries
         state.setdefault("tool_logs", []).append(
             {
                 "tool": "arxiv_search",
                 "query": topic,
+                "expanded_queries": queries,
                 "paper_count": len(paper_dicts),
+                "rejected_count": len(rejected),
+                "min_relevance": state.get("min_relevance", 3.0),
                 "warnings": warnings,
             }
         )
@@ -72,7 +89,7 @@ class ReadingAgent:
     def run(self, state: ResearchState, llm: BaseLLM) -> ResearchState:
         analyses: List[Dict[str, Any]] = []
         for paper in state.get("papers", []):
-            analyses.append(self._analyze_paper(paper).to_dict())
+            analyses.append(self._analyze_paper(paper, llm).to_dict())
 
         pdf_notes: List[Dict[str, str]] = []
         for raw_path in state.get("pdf_paths", []):
@@ -104,6 +121,7 @@ class ReadingAgent:
                         limitations="Only the first pages are read in the demo mode.",
                         tags=["pdf", "local-document"],
                         source="local_pdf",
+                        category="本地PDF材料",
                     ).to_dict()
                 )
 
@@ -116,7 +134,62 @@ class ReadingAgent:
         )
         return state
 
-    def _analyze_paper(self, paper: Dict[str, Any]) -> PaperAnalysis:
+    def _analyze_paper(self, paper: Dict[str, Any], llm: BaseLLM) -> PaperAnalysis:
+        if llm.mode != "mock":
+            llm_result = self._analyze_with_llm(paper, llm)
+            if llm_result is not None:
+                return llm_result
+        return self._fallback_analyze_paper(paper)
+
+    def _analyze_with_llm(
+        self, paper: Dict[str, Any], llm: BaseLLM
+    ) -> PaperAnalysis | None:
+        system_prompt = (
+            "You are ReadingAgent. Extract only what is supported by the title and abstract. "
+            "Return strict JSON with keys: contribution, method, limitations, tags, category. "
+            "category must be one of: 综述与分类, 长期记忆架构, 检索增强记忆, 反思与经验记忆, "
+            "安全隐私与评测, 其他相关方向. Use Chinese, concise wording."
+        )
+        user_prompt = json.dumps(
+            {
+                "title": paper.get("title", ""),
+                "year": paper.get("year", ""),
+                "abstract": paper.get("summary", ""),
+                "matched_terms": paper.get("matched_terms", []),
+                "relevance_score": paper.get("relevance_score", 0),
+            },
+            ensure_ascii=False,
+        )
+        try:
+            raw = llm.invoke(system_prompt, user_prompt)
+            data = parse_json_object(raw)
+        except Exception:
+            return None
+        if not data:
+            return None
+        tags = data.get("tags", [])
+        if isinstance(tags, str):
+            tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
+        if not isinstance(tags, list):
+            tags = []
+        return PaperAnalysis(
+            title=paper.get("title", ""),
+            year=str(paper.get("year", "unknown")),
+            url=paper.get("url", ""),
+            contribution=str(data.get("contribution", "")).strip()
+            or first_sentence(paper.get("summary", "")),
+            method=str(data.get("method", "")).strip()
+            or infer_method(paper.get("title", ""), paper.get("summary", "")),
+            limitations=str(data.get("limitations", "")).strip()
+            or "仅基于摘要分析，尚需全文验证。",
+            tags=[str(tag) for tag in tags[:5]] or infer_tags(paper.get("title", "")),
+            source=paper.get("source", "arxiv"),
+            category=str(data.get("category", "")).strip()
+            or infer_category(paper.get("title", ""), paper.get("summary", "")),
+            relevance_score=float(paper.get("relevance_score", 0) or 0),
+        )
+
+    def _fallback_analyze_paper(self, paper: Dict[str, Any]) -> PaperAnalysis:
         title = paper.get("title", "")
         summary = paper.get("summary", "")
         tags = infer_tags(title + " " + summary)
@@ -135,6 +208,8 @@ class ReadingAgent:
             limitations=limitations,
             tags=tags,
             source=paper.get("source", "arxiv"),
+            category=infer_category(title, summary),
+            relevance_score=float(paper.get("relevance_score", 0) or 0),
         )
 
 
@@ -142,14 +217,17 @@ class CriticAgent:
     name = "CriticAgent"
 
     def run(self, state: ResearchState, llm: BaseLLM) -> ResearchState:
-        system_prompt = "You are CriticAgent. Use Reflection to identify limits and risks."
-        titles = "\n".join(
-            f"- {item.get('title', '')}" for item in state.get("paper_analyses", [])
+        system_prompt = (
+            "You are CriticAgent. Use Reflection to identify limits and risks. "
+            "Stay within the provided analyses; do not invent papers, tools, or experiments."
+        )
+        analysis_payload = json.dumps(
+            state.get("paper_analyses", []), ensure_ascii=False, indent=2
         )
         user_prompt = (
-            "请反思这些论文和调研结果可能存在的不足：\n"
-            f"{titles}\n"
-            "从数据、实验、长期记忆、隐私和应用落地角度总结。"
+            "请基于以下结构化阅读结果做反思，输出不超过6条要点：\n"
+            f"{analysis_payload}\n"
+            "角度：摘要证据不足、实验验证、长期记忆更新、隐私安全、应用落地。"
         )
         critique = llm.invoke(system_prompt, user_prompt)
         state["critique_summary"] = critique
@@ -198,6 +276,21 @@ def infer_tags(text: str) -> List[str]:
     return tags or ["agent-memory"]
 
 
+def infer_category(title: str, summary: str) -> str:
+    text = f"{title} {summary}".lower()
+    if "survey" in text or "taxonomy" in text:
+        return "综述与分类"
+    if "privacy" in text or "attack" in text or "risk" in text or "benchmark" in text:
+        return "安全隐私与评测"
+    if "retrieval" in text or "rag" in text or "vector" in text or "database" in text:
+        return "检索增强记忆"
+    if "reflection" in text or "reflexion" in text or "feedback" in text:
+        return "反思与经验记忆"
+    if "long-term" in text or "persistent" in text or "memgpt" in text or "memorybank" in text:
+        return "长期记忆架构"
+    return "其他相关方向"
+
+
 def infer_method(title: str, summary: str) -> str:
     text = f"{title} {summary}".lower()
     if "survey" in text:
@@ -220,6 +313,19 @@ def first_sentence(text: str) -> str:
     return text.strip()
 
 
+def parse_json_object(raw: str) -> Dict[str, Any]:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return {}
+    return json.loads(text[start : end + 1])
+
+
 def summarize_pdf_text(text: str) -> str:
     if not text:
         return ""
@@ -232,12 +338,24 @@ def summarize_pdf_text(text: str) -> str:
 
 
 def build_survey_markdown(state: ResearchState) -> str:
+    analyses = state.get("paper_analyses", [])
+    categories = group_by_category(analyses)
+    rejected = state.get("rejected_papers", [])
+    stats = state.get("stats", {})
     lines: List[str] = [
         f"# AI科研助手调研报告：{state['topic']}",
         "",
-        "## 1. 实验目标与系统概述",
+        "## 1. 执行摘要",
         "",
-        "本系统实现了一个面向科研调研的多智能体团队。输入科研问题后，系统会进行任务规划、长期记忆检索、论文检索、摘要/PDF阅读、反思评价，并自动生成调研报告和思维导图。",
+        (
+            f"本次运行使用 `{state.get('workflow_engine', 'unknown')}` 工作流和 "
+            f"`{state.get('llm_mode', 'unknown')}` 模型模式，围绕科研问题完成了论文检索、"
+            "摘要/PDF阅读、方向归纳、Reflection反思和长期记忆更新。"
+        ),
+        (
+            f"系统接收 {stats.get('paper_count', 0)} 篇高相关论文进入正文分析，"
+            f"过滤 {len(rejected)} 篇低相关候选论文。"
+        ),
         "",
         "## 2. 多Agent分工",
         "",
@@ -249,7 +367,7 @@ def build_survey_markdown(state: ResearchState) -> str:
         "| CriticAgent | 反思论文局限和系统风险 | Reflection |",
         "| WriterAgent | 汇总报告、思维导图和运行日志 | Synthesis |",
         "",
-        "## 3. Manager规划结果",
+        "## 3. 本轮执行计划",
         "",
         state.get("plan", ""),
         "",
@@ -271,14 +389,37 @@ def build_survey_markdown(state: ResearchState) -> str:
             "",
             "## 5. 检索与阅读结果",
             "",
-            "| 年份 | 论文 | 主要贡献 | 方法 | 标签 |",
-            "| --- | --- | --- | --- | --- |",
+            f"- 展开检索式：{'; '.join(state.get('search_queries', []))}",
+            f"- 最低相关性阈值：{state.get('min_relevance', 0)}",
+            f"- 候选池规模：{state.get('candidate_pool', 0)}",
+            "",
+            "### 5.1 研究方向分类",
+            "",
         ]
     )
-    for item in state.get("paper_analyses", []):
+
+    if categories:
+        for category, items in categories.items():
+            titles = "；".join(item.get("title", "") for item in items[:3])
+            lines.append(f"- **{category}**：{len(items)} 篇。代表论文：{titles}")
+    else:
+        lines.append("- 暂无可分类论文。")
+
+    lines.extend(
+        [
+            "",
+            "### 5.2 代表论文表",
+            "",
+            "| 年份 | 相关性 | 方向 | 论文 | 主要贡献 | 方法 | 标签 |",
+            "| --- | ---: | --- | --- | --- | --- | --- |",
+        ]
+    )
+    for item in analyses:
         lines.append(
-            "| {year} | [{title}]({url}) | {contribution} | {method} | {tags} |".format(
+            "| {year} | {score:.2f} | {category} | [{title}]({url}) | {contribution} | {method} | {tags} |".format(
                 year=item.get("year", ""),
+                score=float(item.get("relevance_score", 0) or 0),
+                category=escape_pipe(item.get("category", "")),
                 title=escape_pipe(item.get("title", "")),
                 url=item.get("url", ""),
                 contribution=escape_pipe(item.get("contribution", "")),
@@ -287,13 +428,13 @@ def build_survey_markdown(state: ResearchState) -> str:
             )
         )
 
-    stats = state.get("stats", {})
     lines.extend(
         [
             "",
             "## 6. 统计工具结果",
             "",
             f"- 论文数量：{stats.get('paper_count', 0)}",
+            f"- 平均相关性：{stats.get('average_relevance', 0)}",
             f"- 年份分布：{json.dumps(stats.get('year_distribution', {}), ensure_ascii=False)}",
             "- 高频关键词："
             + ", ".join(
@@ -305,11 +446,26 @@ def build_survey_markdown(state: ResearchState) -> str:
             "",
             state.get("critique_summary", ""),
             "",
-            "## 8. 评分要求对齐",
+            "## 8. 被过滤候选论文",
+            "",
+        ]
+    )
+    if rejected:
+        for item in rejected[:10]:
+            lines.append(
+                f"- {item.get('title', '')} ({item.get('year', '')})：相关性 {item.get('relevance_score', 0)}，原因：{item.get('reason', '')}"
+            )
+    else:
+        lines.append("- 无。")
+
+    lines.extend(
+        [
+            "",
+            "## 9. 评分要求对齐",
             "",
             "- Agent数量：5个，满足 >= 4。",
             "- 推理/规划：ManagerAgent使用Planning + CoT，SearchAgent体现ReAct，CriticAgent体现Reflection。",
-            "- 记忆机制：短期记忆为本轮messages/tool_logs/notes；长期记忆为data/long_term_memory.json。",
+            f"- 记忆机制：短期记忆为本轮messages/tool_logs/notes；长期记忆为{state.get('memory_path', '')}。",
             "- 工具调用：arxiv_search、pdf_extract、paper_stats，共3类。",
             "- 输出产物：survey.md、mindmap.md、run_log.json。",
         ]
@@ -318,6 +474,7 @@ def build_survey_markdown(state: ResearchState) -> str:
 
 
 def build_mindmap_markdown(state: ResearchState) -> str:
+    categories = group_by_category(state.get("paper_analyses", []))
     lines = [
         f"# Mindmap：{state['topic']}",
         "",
@@ -339,12 +496,21 @@ def build_mindmap_markdown(state: ResearchState) -> str:
         "      统计分析",
         "    研究主题",
     ]
-    for item in state.get("paper_analyses", [])[:6]:
-        title = item.get("title", "paper").replace("(", "").replace(")", "")
-        lines.append(f"      {title[:48]}")
+    for category, items in categories.items():
+        lines.append(f"      {category}")
+        for item in items[:3]:
+            title = item.get("title", "paper").replace("(", "").replace(")", "")
+            lines.append(f"        {title[:48]}")
     lines.extend(["```", ""])
     return "\n".join(lines)
 
 
 def escape_pipe(text: str) -> str:
     return " ".join(str(text).split()).replace("|", "\\|")
+
+
+def group_by_category(items: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for item in items:
+        grouped.setdefault(item.get("category", "未分类"), []).append(item)
+    return grouped
