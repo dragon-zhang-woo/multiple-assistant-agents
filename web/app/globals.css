@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Inter", "SF Pro Text", "Segoe UI", Arial, sans-serif;
+  --font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --background: 42 32% 93%;
+  --foreground: 28 18% 16%;
+  --paper: 42 35% 97%;
+  --paper-foreground: 28 18% 16%;
+  --muted: 38 22% 88%;
+  --muted-foreground: 29 9% 43%;
+  --accent: 32 34% 88%;
+  --accent-foreground: 27 22% 20%;
+  --border: 34 20% 79%;
+  --input: 34 20% 79%;
+  --ring: 28 22% 36%;
+  --radius: 0.5rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+  letter-spacing: 0;
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+::selection {
+  background: hsl(var(--accent));
+}
+
+.quiet-scrollbar {
+  scrollbar-color: hsl(var(--border)) transparent;
+  scrollbar-width: thin;
+}
+
+.quiet-scrollbar::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.quiet-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 999px;
+}
+
+.paper-prose {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.78;
+}
+
+.paper-prose h1,
+.paper-prose h2,
+.paper-prose h3 {
+  font-family: var(--font-sans);
+  letter-spacing: 0;
+}
