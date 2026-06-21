@@ -32,6 +32,9 @@ export interface LiteratureRow {
   id: string;
   title: string;
   year: string;
+  source?: string;
+  importance?: "core" | "supporting";
+  score?: number;
   direction: string;
   method: string;
   evidence: string;
@@ -121,5 +124,6 @@ export interface RunSummary {
   runLogPath: string;
   warnings: string[];
   paperCount: number;
+  supportingCount?: number;
   rejectedCount: number;
 }

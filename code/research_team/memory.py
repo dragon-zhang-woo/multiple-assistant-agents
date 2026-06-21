@@ -21,12 +21,21 @@ class LongTermMemory:
         self, query: str, top_k: int = 3, min_score: float = 0.12
     ) -> List[Dict[str, Any]]:
         query_vec = text_vector(expand_query_for_memory(query))
+        query_domain = infer_domain(query)
+        query_keywords = set(infer_keywords(query))
         scored: List[Dict[str, Any]] = []
         for entry in self.entries:
+            entry_domain = entry.get("domain", "general")
+            entry_keywords = set(entry.get("topic_keywords", []))
+            if query_domain != "general" and entry_domain not in {query_domain, "general", ""}:
+                continue
+            if query_keywords and entry_keywords and not (query_keywords & entry_keywords):
+                continue
             evidence_text = " ".join(
                 [
                     " ".join(p.get("title", "") for p in entry.get("papers", [])),
                     " ".join(entry.get("tags", [])),
+                    " ".join(entry.get("topic_keywords", [])),
                 ]
             )
             if entry.get("papers") and cosine(query_vec, text_vector(evidence_text)) == 0:
@@ -55,17 +64,22 @@ class LongTermMemory:
         paper_list = list(papers)
         analysis_list = list(analyses)
         tags = sorted({tag for item in analysis_list for tag in item.get("tags", [])})
+        sources = sorted({paper.get("source", "") for paper in paper_list if paper.get("source")})
         fingerprint = run_fingerprint(topic, paper_list)
         entry = {
             "id": f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "fingerprint": fingerprint,
             "topic": topic,
+            "domain": infer_domain(topic),
+            "sources": sources,
+            "topic_keywords": infer_keywords(topic),
             "papers": [
                 {
                     "title": paper.get("title", ""),
                     "year": paper.get("year", ""),
                     "url": paper.get("url", ""),
+                    "source": paper.get("source", ""),
                 }
                 for paper in paper_list
             ],
@@ -122,6 +136,24 @@ def expand_query_for_memory(query: str) -> str:
         return f"{query} {normalize_arxiv_query(query)}"
     except Exception:
         return query
+
+
+def infer_domain(query: str) -> str:
+    try:
+        from research_team.tools import infer_topic_domain
+
+        return infer_topic_domain(query)
+    except Exception:
+        return "general"
+
+
+def infer_keywords(query: str) -> List[str]:
+    try:
+        from research_team.tools import topic_keywords
+
+        return topic_keywords(query)
+    except Exception:
+        return list(text_vector(query).keys())[:12]
 
 
 def cosine(left: Counter, right: Counter) -> float:

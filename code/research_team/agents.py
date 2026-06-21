@@ -8,12 +8,13 @@ from typing import Any, Dict, List
 from research_team.llm import BaseLLM
 from research_team.models import PaperAnalysis, ResearchState
 from research_team.tools import (
-    arxiv_search,
     extract_pdf_text,
     is_agent_memory_topic,
     is_atmospheric_optics_topic,
+    is_life_science_topic,
     keyword_tokens,
     paper_stats,
+    research_search,
 )
 
 
@@ -33,7 +34,7 @@ class ManagerAgent:
     def run(self, state: ResearchState, llm: BaseLLM) -> ResearchState:
         system_prompt = (
             "You are ManagerAgent for a runnable course project. Use concise Planning. "
-            "Only mention implemented capabilities: arXiv search, local PDF extraction, "
+            "Only mention implemented capabilities: arXiv/PubMed search, local PDF extraction, "
             "paper statistics, JSON long-term memory, LangGraph workflow, and Markdown output. "
             "Do not mention Google Scholar, Semantic Scholar, Chroma, FAISS, Neo4j, citation APIs, "
             "parallel crawling, or any unimplemented tool."
@@ -57,28 +58,38 @@ class SearchAgent:
         add_message(
             state,
             self.name,
-            f"Thought: need recent papers for '{topic}'. Action: arxiv_search.",
+            f"Thought: need recent papers for '{topic}'. Action: research_search.",
         )
-        papers, warnings, rejected, queries = arxiv_search(
+        search_result = research_search(
             topic=topic,
             max_results=state.get("max_papers", 5),
             candidate_pool=state.get("candidate_pool", 25),
             min_relevance=state.get("min_relevance", 3.0),
             sort_by=state.get("sort_by", "relevance"),
         )
+        papers = search_result["papers"]
+        supporting = search_result["supporting_papers"]
+        warnings = search_result["warnings"]
+        rejected = search_result["rejected_papers"]
+        queries = search_result["queries"]
         state.setdefault("warnings", []).extend(warnings)
         paper_dicts = [paper.to_dict() for paper in papers]
+        supporting_dicts = [paper.to_dict() for paper in supporting]
         state["papers"] = paper_dicts
+        state["supporting_papers"] = supporting_dicts
         state["rejected_papers"] = rejected
         state["search_queries"] = queries
+        state["search_diagnostics"] = search_result["search_diagnostics"]
         state.setdefault("tool_logs", []).append(
             {
-                "tool": "arxiv_search",
+                "tool": "research_search",
                 "query": topic,
                 "expanded_queries": queries,
                 "paper_count": len(paper_dicts),
+                "supporting_count": len(supporting_dicts),
                 "rejected_count": len(rejected),
                 "min_relevance": state.get("min_relevance", 3.0),
+                "diagnostics": search_result["search_diagnostics"],
                 "warnings": warnings,
             }
         )
@@ -86,7 +97,8 @@ class SearchAgent:
             state,
             self.name,
             "Observe: retrieved "
-            f"{len(paper_dicts)} papers. Summarize: candidates are ready for ReadingAgent.",
+            f"{len(paper_dicts)} core papers and {len(supporting_dicts)} supporting papers. "
+            "Summarize: candidates are ready for ReadingAgent.",
         )
         return state
 
@@ -303,6 +315,16 @@ def infer_tags(text: str, topic: str = "") -> List[str]:
             "polarization": ["polarization", "polarimetry"],
             "sky-brightness": ["sky brightness", "skyglow", "light pollution"],
         }
+    elif is_life_science_topic(topic):
+        candidates = {
+            "dna": ["dna", "genome", "genomic", "genomics"],
+            "sequencing": ["sequencing", "transcriptomics", "single-cell"],
+            "epigenetics": ["epigenetics", "methylation", "chromatin"],
+            "dna-repair": ["repair", "damage", "break"],
+            "crispr": ["crispr", "gene editing", "genome editing"],
+            "virus": ["virus", "viral", "virology", "infection", "vaccine"],
+            "protein": ["protein", "folding", "structure", "proteomics"],
+        }
     else:
         candidates = {
             "survey": ["survey", "review", "taxonomy"],
@@ -358,7 +380,7 @@ def build_safe_manager_plan(state: ResearchState) -> str:
     return "\n".join(
         [
             "1. ManagerAgent明确主题、检索参数和本轮可用工具边界。",
-            "2. SearchAgent使用arXiv检索式和本地相关性评分筛选候选论文。",
+            "2. SearchAgent使用arXiv/PubMed检索式和本地相关性评分筛选候选论文。",
             pdf_step,
             "4. ReadingAgent提取每篇论文的贡献、方法、局限、标签和方向分类。",
             "5. CriticAgent只基于已提取材料做Reflection，指出证据不足、方法局限和应用边界。",
@@ -379,6 +401,22 @@ def infer_category(title: str, summary: str, topic: str = "") -> str:
         if "instrument" in text or "observing program" in text or "telescope" in text:
             return "观测仪器与应用"
         return "大气光学相关研究"
+    if is_life_science_topic(topic):
+        if "survey" in text or "review" in text:
+            return "综述与进展"
+        if "crispr" in text or "gene editing" in text or "genome editing" in text:
+            return "基因编辑与CRISPR"
+        if "repair" in text or "damage" in text or "break" in text:
+            return "DNA损伤与修复"
+        if "methylation" in text or "epigenetic" in text or "chromatin" in text:
+            return "表观遗传与调控"
+        if "sequencing" in text or "genomic" in text or "genomics" in text or "transcriptomics" in text:
+            return "基因组测序与组学"
+        if "virus" in text or "viral" in text or "infection" in text or "vaccine" in text:
+            return "病毒学与感染"
+        if "protein" in text or "folding" in text or "structure" in text:
+            return "蛋白质结构与功能"
+        return "生命科学相关研究"
     if not is_agent_memory_topic(topic):
         if "survey" in text or "review" in text or "taxonomy" in text:
             return "综述与分类"
@@ -416,6 +454,20 @@ def infer_method(title: str, summary: str, topic: str = "") -> str:
         if "observing program" in text or "instrument" in text:
             return "Astronomical twilight observing program or instrument use."
         return "Atmospheric-optics observation and analysis."
+    if is_life_science_topic(topic):
+        if "sequencing" in text or "genomic" in text or "transcriptomics" in text:
+            return "Genomic or sequencing-based analysis."
+        if "crispr" in text or "gene editing" in text:
+            return "Genome editing or CRISPR-based experimental/computational study."
+        if "methylation" in text or "epigenetic" in text:
+            return "Epigenetic profiling or methylation analysis."
+        if "repair" in text or "damage" in text:
+            return "DNA damage/repair mechanism analysis."
+        if "virus" in text or "viral" in text:
+            return "Virology, infection, or vaccine-related analysis."
+        if "protein" in text:
+            return "Protein structure, function, or proteomics analysis."
+        return "Life-science study inferred from title and abstract."
     if not is_agent_memory_topic(topic):
         if "survey" in text or "review" in text:
             return "Literature review and synthesis."
@@ -464,6 +516,8 @@ def critic_angles_for_topic(topic: str) -> str:
         return "摘要证据不足、实验验证、长期记忆更新、隐私安全、应用落地"
     if is_atmospheric_optics_topic(topic):
         return "摘要证据不足、观测地点和时间覆盖、仪器与校准、气溶胶/散射条件、模型可复现性、应用边界"
+    if is_life_science_topic(topic):
+        return "摘要证据不足、样本和数据覆盖、实验验证、统计效力、可复现性、临床或应用边界"
     return "摘要证据不足、方法和数据覆盖、实验或观测验证、可复现性、局限性、应用边界"
 
 
@@ -482,6 +536,12 @@ def build_fallback_critique(state: ResearchState) -> str:
             "反思：本轮结果主要依赖标题和摘要，霞光/暮光相关研究常受观测地点、季节、"
             "气溶胶条件、仪器校准和波段选择影响；摘要级分析难以判断数据覆盖范围、"
             "散射模型假设和观测可复现性，后续应优先阅读全文方法与观测设置。"
+        )
+    if is_life_science_topic(topic):
+        return (
+            "反思：本轮结果主要基于题名、摘要和数据库元数据，生命科学研究还需要核查样本来源、"
+            "实验设计、测序/检测平台、统计效力、独立验证、可复现性和临床或生态外推边界；"
+            "补充阅读全文和原始数据会显著提高结论可靠性。"
         )
     return (
         "反思：本轮结果主要基于摘要和元数据，方法细节、数据覆盖、实验设置和可复现性"
@@ -522,9 +582,11 @@ def summarize_pdf_text(text: str) -> str:
 
 def build_survey_markdown(state: ResearchState) -> str:
     analyses = state.get("paper_analyses", [])
+    supporting = state.get("supporting_papers", [])
     categories = group_by_category(analyses)
     rejected = state.get("rejected_papers", [])
     stats = state.get("stats", {})
+    diagnostics = state.get("search_diagnostics", {})
     lines: List[str] = [
         f"# AI科研助手调研报告：{state['topic']}",
         "",
@@ -537,7 +599,7 @@ def build_survey_markdown(state: ResearchState) -> str:
         ),
         (
             f"系统接收 {stats.get('paper_count', 0)} 篇高相关论文进入正文分析，"
-            f"过滤 {len(rejected)} 篇低相关候选论文。"
+            f"保留 {len(supporting)} 篇低权重补充候选，过滤 {len(rejected)} 篇低相关候选论文。"
         ),
         "",
         "## 2. 多Agent分工",
@@ -545,7 +607,7 @@ def build_survey_markdown(state: ResearchState) -> str:
         "| Agent | 职责 | 推理/规划方法 |",
         "| --- | --- | --- |",
         "| ManagerAgent | 拆解科研问题并安排流程 | Planning + CoT |",
-        "| SearchAgent | 检索arXiv论文并记录工具观察 | ReAct |",
+        "| SearchAgent | 检索arXiv/PubMed论文并记录工具观察 | ReAct |",
         "| ReadingAgent | 阅读摘要和本地PDF，提取贡献/方法 | Structured extraction |",
         "| CriticAgent | 反思论文局限和系统风险 | Reflection |",
         "| WriterAgent | 汇总报告、思维导图和运行日志 | Synthesis |",
@@ -575,6 +637,27 @@ def build_survey_markdown(state: ResearchState) -> str:
             f"- 展开检索式：{'; '.join(state.get('search_queries', []))}",
             f"- 最低相关性阈值：{state.get('min_relevance', 0)}",
             f"- 候选池规模：{state.get('candidate_pool', 0)}",
+            f"- 主题领域：{diagnostics.get('domain', 'unknown')}",
+            f"- 主题关键词：{', '.join(diagnostics.get('topic_keywords', []))}",
+            "",
+            "### 5.0 检索源诊断",
+            "",
+        ]
+    )
+
+    sources = diagnostics.get("sources", [])
+    if sources:
+        for source in sources:
+            warning_text = "；".join(source.get("warnings", [])) or "无"
+            lines.append(
+                f"- {source.get('source', '')}：查询 {source.get('query_count', 0)} 组，"
+                f"候选 {source.get('candidate_count', 0)} 篇，warning：{warning_text}"
+            )
+    else:
+        lines.append("- 暂无检索源诊断。")
+
+    lines.extend(
+        [
             "",
             "### 5.1 研究方向分类",
             "",
@@ -593,14 +676,15 @@ def build_survey_markdown(state: ResearchState) -> str:
             "",
             "### 5.2 代表论文表",
             "",
-            "| 年份 | 相关性 | 方向 | 论文 | 主要贡献 | 方法 | 标签 |",
-            "| --- | ---: | --- | --- | --- | --- | --- |",
+            "| 年份 | 来源 | 相关性 | 方向 | 论文 | 主要贡献 | 方法 | 标签 |",
+            "| --- | --- | ---: | --- | --- | --- | --- | --- |",
         ]
     )
     for item in analyses:
         lines.append(
-            "| {year} | {score:.2f} | {category} | [{title}]({url}) | {contribution} | {method} | {tags} |".format(
+            "| {year} | {source} | {score:.2f} | {category} | [{title}]({url}) | {contribution} | {method} | {tags} |".format(
                 year=item.get("year", ""),
+                source=item.get("source", ""),
                 score=float(item.get("relevance_score", 0) or 0),
                 category=escape_pipe(item.get("category", "")),
                 title=escape_pipe(item.get("title", "")),
@@ -610,13 +694,56 @@ def build_survey_markdown(state: ResearchState) -> str:
                 tags=", ".join(item.get("tags", [])),
             )
         )
+    if not analyses:
+        lines.append("| - | - | 0.00 | - | 暂无核心论文 | - | - | - |")
+
+    lines.extend(
+        [
+            "",
+            "### 5.3 低权重补充候选",
+            "",
+        ]
+    )
+    if supporting:
+        lines.extend(
+            [
+                "| 年份 | 来源 | 相关性 | 论文 | 匹配词 |",
+                "| --- | --- | ---: | --- | --- |",
+            ]
+        )
+        for item in supporting[:12]:
+            lines.append(
+                "| {year} | {source} | {score:.2f} | [{title}]({url}) | {terms} |".format(
+                    year=item.get("year", ""),
+                    source=item.get("source", ""),
+                    score=float(item.get("relevance_score", 0) or 0),
+                    title=escape_pipe(item.get("title", "")),
+                    url=item.get("url", ""),
+                    terms=", ".join(item.get("matched_terms", [])),
+                )
+            )
+    else:
+        lines.append("- 无补充候选。")
+
+    if not analyses and not supporting:
+        lines.extend(
+            [
+                "",
+                "### 5.4 空结果诊断",
+                "",
+                "- 本轮没有足够候选进入核心或补充列表。",
+                "- 建议降低 Min score、扩大 Pool、换用更具体英文关键词，或上传本地PDF让 ReadingAgent 直接读取。",
+                "- 若 Run Log 显示某个检索源 warning，优先检查网络/VPN或稍后重试。",
+            ]
+        )
 
     lines.extend(
         [
             "",
             "## 6. 统计工具结果",
             "",
-            f"- 论文数量：{stats.get('paper_count', 0)}",
+            f"- 核心论文数量：{stats.get('paper_count', 0)}",
+            f"- 补充候选数量：{len(supporting)}",
             f"- 平均相关性：{stats.get('average_relevance', 0)}",
             f"- 年份分布：{json.dumps(stats.get('year_distribution', {}), ensure_ascii=False)}",
             "- 高频关键词："
@@ -649,7 +776,7 @@ def build_survey_markdown(state: ResearchState) -> str:
             "- Agent数量：5个，满足 >= 4。",
             "- 推理/规划：ManagerAgent使用Planning + CoT，SearchAgent体现ReAct，CriticAgent体现Reflection。",
             f"- 记忆机制：短期记忆为本轮messages/tool_logs/notes；长期记忆为{state.get('memory_path', '')}。",
-            "- 工具调用：arxiv_search、pdf_extract、paper_stats，共3类。",
+            "- 工具调用：research_search（arXiv/PubMed）、pdf_extract、paper_stats，共3类。",
             "- 输出产物：survey.md、mindmap.md、run_log.json。",
         ]
     )
@@ -674,7 +801,7 @@ def build_mindmap_markdown(state: ResearchState) -> str:
         "      短期记忆",
         "      长期JSON向量记忆",
         "    工具调用",
-        "      arXiv检索",
+        "      arXiv/PubMed检索",
         "      PDF读取",
         "      统计分析",
         "    研究主题",

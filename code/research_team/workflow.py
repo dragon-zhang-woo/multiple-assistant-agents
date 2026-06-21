@@ -63,8 +63,10 @@ def run_research_workflow(
         "warnings": llm_warnings,
         "retrieved_memories": [],
         "papers": [],
+        "supporting_papers": [],
         "rejected_papers": [],
         "search_queries": [],
+        "search_diagnostics": {},
         "paper_analyses": [],
         "pdf_notes": [],
         "llm_mode": llm.mode,
@@ -227,7 +229,8 @@ def summarize_node_result(node_name: str, state: ResearchState) -> str:
         return f"Retrieved {len(state.get('retrieved_memories', []))} memory entries."
     if node_name == "search":
         return (
-            f"Accepted {len(state.get('papers', []))} papers and rejected "
+            f"Accepted {len(state.get('papers', []))} core papers, kept "
+            f"{len(state.get('supporting_papers', []))} supporting papers, and rejected "
             f"{len(state.get('rejected_papers', []))} candidates."
         )
     if node_name == "read":

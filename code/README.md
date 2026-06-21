@@ -1,13 +1,13 @@
 # AI Research Agent Team
 
-期末作业初版：一个面向科研调研的多智能体系统。输入科研问题后，系统会完成任务规划、长期记忆检索、arXiv论文检索、摘要/PDF阅读、Reflection反思，并生成 `survey.md` 与 `mindmap.md`。
+期末作业初版：一个面向科研调研的多智能体系统。输入科研问题后，系统会完成任务规划、长期记忆检索、arXiv/PubMed论文检索、摘要/PDF阅读、Reflection反思，并生成 `survey.md` 与 `mindmap.md`。
 
 ## 实验要求对齐
 
 - 多智能体数量：5个，分别是 `ManagerAgent`、`SearchAgent`、`ReadingAgent`、`CriticAgent`、`WriterAgent`。
 - 推理/规划方法：`ManagerAgent` 使用 Planning + CoT；`SearchAgent` 使用 ReAct 风格的 Thought/Action/Observe；`CriticAgent` 使用 Reflection。
 - 记忆机制：短期记忆保存在 `messages`、`tool_logs`、`pdf_notes`；长期记忆保存在 `data/long_term_memory.json`。
-- 工具调用：`arxiv_search`、`pdf_extract`、`paper_stats`，另包含 `memory_retrieve` 和 `memory_update`。
+- 工具调用：`research_search`（arXiv/PubMed）、`pdf_extract`、`paper_stats`，另包含 `memory_retrieve` 和 `memory_update`。
 - 框架：优先使用 LangGraph；如果当前环境未安装 LangGraph，会顺序执行同一工作流并在日志中记录 warning，便于课堂演示。
 
 ## 安装依赖
@@ -44,7 +44,7 @@ $env:DASHSCOPE_API_KEY="your_key_here"
 .\.venv\Scripts\python code\main.py --provider dashscope --topic "近年来Agent Memory有哪些研究方向？" --max-papers 5 --mock never
 ```
 
-检索质量参数：
+检索质量参数（`--max-papers` 为核心论文数，报告还会保留低权重补充候选）：
 
 ```bash
 python code/main.py --topic "近年来Agent Memory有哪些研究方向？" --candidate-pool 30 --min-relevance 3.5 --sort relevance

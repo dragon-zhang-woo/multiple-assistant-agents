@@ -13,13 +13,18 @@ class Paper:
     url: str
     pdf_url: str = ""
     source: str = "arxiv"
+    importance: str = "core"
+    domain: str = "general"
     relevance_score: float = 0.0
     matched_terms: List[str] | None = None
+    topic_keywords: List[str] | None = None
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         if data["matched_terms"] is None:
             data["matched_terms"] = []
+        if data["topic_keywords"] is None:
+            data["topic_keywords"] = []
         return data
 
 
@@ -51,8 +56,10 @@ class ResearchState(TypedDict, total=False):
     warnings: List[str]
     retrieved_memories: List[Dict[str, Any]]
     papers: List[Dict[str, Any]]
+    supporting_papers: List[Dict[str, Any]]
     rejected_papers: List[Dict[str, Any]]
     search_queries: List[str]
+    search_diagnostics: Dict[str, Any]
     paper_analyses: List[Dict[str, Any]]
     pdf_notes: List[Dict[str, str]]
     stats: Dict[str, Any]

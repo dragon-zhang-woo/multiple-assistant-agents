@@ -31,7 +31,7 @@ const initialAgents: NonEmptyArray<AgentProfile> = [
   {
     id: "scholar",
     name: "Scholar",
-    role: "arXiv 检索与候选过滤",
+    role: "arXiv/PubMed 检索与候选过滤",
     status: "idle",
     progress: 0,
     currentTask: "等待检索"
@@ -65,9 +65,9 @@ const initialAgents: NonEmptyArray<AgentProfile> = [
 const initialSettings: ResearchSettings = {
   provider: "mock",
   model: "deterministic-mock",
-  maxPapers: 5,
-  candidatePool: 25,
-  minRelevance: 3,
+  maxPapers: 8,
+  candidatePool: 80,
+  minRelevance: 2,
   sort: "relevance",
   mockMode: "always"
 };
@@ -391,7 +391,7 @@ export function useResearchThread() {
           ...session.project,
           name: topic.slice(0, 34) || "Research run",
           updatedAt: "just now",
-          description: `${summary.paperCount} papers · ${summary.llmMode}`
+          description: `${summary.paperCount} papers + ${summary.supportingCount ?? 0} support · ${summary.llmMode}`
         }
       }));
       setProjectOrder((current) => [threadId, ...current.filter((id) => id !== threadId)]);

@@ -43,9 +43,9 @@ def run_web_workflow(request: Dict[str, Any]) -> Dict[str, Any]:
 
     return run_research_workflow(
         topic=str(request.get("topic") or "近年来Agent Memory有哪些研究方向？"),
-        max_papers=to_int(request.get("maxPapers"), 5),
-        candidate_pool=to_int(request.get("candidatePool"), 25),
-        min_relevance=to_float(request.get("minRelevance"), 3.0),
+        max_papers=to_int(request.get("maxPapers"), 8),
+        candidate_pool=to_int(request.get("candidatePool"), 80),
+        min_relevance=to_float(request.get("minRelevance"), 2.0),
         sort_by=str(request.get("sort") or "relevance"),
         pdf_paths=pdf_paths,
         output_dir=output_dir,
@@ -104,6 +104,7 @@ def emit_completion_events(state: Dict[str, Any]) -> None:
             "runLogPath": state.get("run_log_path", ""),
             "warnings": state.get("warnings", []),
             "paperCount": len(state.get("papers", [])),
+            "supportingCount": len(state.get("supporting_papers", [])),
             "rejectedCount": len(state.get("rejected_papers", [])),
         }
     )
@@ -162,17 +163,35 @@ def markdown_artifact(
 def matrix_artifact(
     state: Dict[str, Any], run_name: str, created_at: str
 ) -> Dict[str, Any]:
-    literature = [
+    core_rows = [
         {
             "id": f"paper-{index + 1}",
             "title": item.get("title", ""),
             "year": str(item.get("year", "")),
+            "source": item.get("source", ""),
+            "importance": item.get("importance", "core"),
+            "score": item.get("relevance_score", 0),
             "direction": item.get("category", ""),
             "method": item.get("method", ""),
             "evidence": item.get("contribution", ""),
             "confidence": confidence_from_score(item.get("relevance_score", 0)),
         }
         for index, item in enumerate(state.get("paper_analyses", []))
+    ]
+    supporting_rows = [
+        {
+            "id": f"supporting-{index + 1}",
+            "title": item.get("title", ""),
+            "year": str(item.get("year", "")),
+            "source": item.get("source", ""),
+            "importance": item.get("importance", "supporting"),
+            "score": item.get("relevance_score", 0),
+            "direction": "补充候选",
+            "method": "Lower-weight candidate retained for broader coverage.",
+            "evidence": item.get("summary", ""),
+            "confidence": confidence_from_score(item.get("relevance_score", 0)),
+        }
+        for index, item in enumerate(state.get("supporting_papers", []))
     ]
     return {
         "id": "matrix",
@@ -185,7 +204,7 @@ def matrix_artifact(
                 "createdAt": created_at,
                 "summary": "代表论文矩阵",
                 "content": "",
-                "literature": literature,
+                "literature": core_rows + supporting_rows,
             }
         ],
     }
@@ -223,6 +242,7 @@ def build_completion_message(state: Dict[str, Any]) -> str:
         f"- 工作流：{state.get('workflow_engine', 'unknown')}\n"
         f"- 模型模式：{state.get('llm_mode', 'unknown')}\n"
         f"- 正文论文：{len(state.get('papers', []))} 篇\n"
+        f"- 补充候选：{len(state.get('supporting_papers', []))} 篇\n"
         f"- 过滤候选：{len(state.get('rejected_papers', []))} 篇\n\n"
         "右侧 Artifacts 已更新调研报告、思维导图、文献矩阵和运行日志。"
         f"{warning_text}"

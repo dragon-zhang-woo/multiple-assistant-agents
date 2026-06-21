@@ -22,13 +22,13 @@ def parse_args() -> argparse.Namespace:
         "--max-papers",
         type=int,
         default=5,
-        help="Maximum number of papers to retrieve from arXiv.",
+        help="Maximum number of core papers to keep in the report.",
     )
     parser.add_argument(
         "--candidate-pool",
         type=int,
         default=25,
-        help="Number of arXiv candidates to inspect before relevance filtering. Use 0 for offline fallback samples.",
+        help="Number of search candidates to inspect before relevance filtering. Use 0 for offline fallback samples.",
     )
     parser.add_argument(
         "--min-relevance",
@@ -40,7 +40,7 @@ def parse_args() -> argparse.Namespace:
         "--sort",
         choices=["relevance", "submittedDate"],
         default="relevance",
-        help="arXiv sort mode before local relevance filtering.",
+        help="Search sort mode before local relevance filtering.",
     )
     parser.add_argument(
         "--pdf",

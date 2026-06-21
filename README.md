@@ -35,6 +35,17 @@ npm run dev
 
 打开 `http://localhost:3000` 后，可以在左侧选择 provider、模型、论文数量、候选池、相关性阈值和排序方式；中间输入科研问题并可上传 PDF；右侧会显示 `survey`、`mindmap`、文献矩阵和 `run_log`。界面支持亮色/暗色主题。
 
+Web 默认参数为 `Papers=8`、`Pool=80`、`Min score=2`。Scholar 会使用 arXiv，并在生命科学/医学主题下自动补充 PubMed；如果 PubMed 因网络或 TLS 问题失败，系统会记录 warning 并继续使用 arXiv 结果，不会生成无解释的空报告。报告会区分核心论文和低权重补充候选，文献矩阵会显示来源、权重和相关性分数。
+
+建议 smoke test 至少覆盖四类问题：
+
+```text
+有关DNA最近有什么研究？
+有关病毒的研究有哪些？
+有没有关于霞光的具体研究？
+Agent Memory 的长期记忆研究方向有哪些？
+```
+
 ### Web API key
 
 Web 端不在浏览器保存 API key。请在 `web/.env.local` 或启动 dev server 的 PowerShell 环境中配置服务端变量：

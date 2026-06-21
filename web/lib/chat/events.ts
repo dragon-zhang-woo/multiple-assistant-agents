@@ -52,6 +52,7 @@ export type ChatStreamEvent =
       runLogPath: string;
       warnings: string[];
       paperCount: number;
+      supportingCount?: number;
       rejectedCount: number;
     }
   | {
@@ -73,6 +74,7 @@ export function toRunSummary(event: Extract<ChatStreamEvent, { type: "run.comple
     runLogPath: event.runLogPath,
     warnings: event.warnings,
     paperCount: event.paperCount,
+    supportingCount: event.supportingCount,
     rejectedCount: event.rejectedCount
   };
 }

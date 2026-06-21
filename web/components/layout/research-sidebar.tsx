@@ -147,7 +147,7 @@ export function ResearchSidebar({
         <button className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
           <BookOpen className="h-4 w-4" />
           {runSummary
-            ? `${runSummary.paperCount} papers · ${runSummary.llmMode}`
+            ? `${runSummary.paperCount} papers + ${runSummary.supportingCount ?? 0} support · ${runSummary.llmMode}`
             : "Local memory and run logs"}
         </button>
       </div>

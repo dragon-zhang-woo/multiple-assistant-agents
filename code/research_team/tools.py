@@ -4,6 +4,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
@@ -36,7 +37,38 @@ STOPWORDS = {
     "this",
     "using",
     "with",
+    "recent",
+    "research",
+    "study",
+    "studies",
+    "direction",
+    "directions",
 }
+
+SHORT_KEYWORDS = {
+    "ai",
+    "dna",
+    "rna",
+    "llm",
+    "gpt",
+}
+
+CHINESE_INTENT_WORDS = [
+    "有关",
+    "关于",
+    "最近",
+    "近年来",
+    "研究",
+    "有哪些",
+    "有什么",
+    "具体",
+    "方向",
+    "论文",
+    "调研",
+    "报告",
+    "？",
+    "?",
+]
 
 POSITIVE_PATTERNS = {
     "agent memory": 5.0,
@@ -86,7 +118,65 @@ CHINESE_QUERY_TERMS = {
     "多智能体": "multi-agent agents",
     "记忆": "memory",
     "长期记忆": "long-term memory",
+    "DNA": "dna genomics sequencing genome gene epigenetics methylation repair crispr",
+    "dna": "dna genomics sequencing genome gene epigenetics methylation repair crispr",
+    "RNA": "rna transcriptomics gene expression sequencing",
+    "rna": "rna transcriptomics gene expression sequencing",
+    "基因组": "genomics genome sequencing",
+    "基因": "gene genomics genome sequencing",
+    "测序": "sequencing genomics transcriptomics",
+    "表观遗传": "epigenetics methylation chromatin",
+    "甲基化": "methylation epigenetics dna",
+    "DNA修复": "dna repair damage genome stability",
+    "基因编辑": "crispr gene editing genome editing",
+    "病毒": "virus viral virology infection vaccine pathogen",
+    "蛋白质": "protein structure folding design proteomics",
 }
+
+LIFE_SCIENCE_TERMS = {
+    "dna",
+    "rna",
+    "gene",
+    "genes",
+    "genome",
+    "genomic",
+    "genomics",
+    "sequencing",
+    "transcriptomics",
+    "epigenetics",
+    "methylation",
+    "chromatin",
+    "repair",
+    "crispr",
+    "virus",
+    "viral",
+    "virology",
+    "infection",
+    "vaccine",
+    "pathogen",
+    "protein",
+    "proteomics",
+    "cell",
+    "cell-free",
+    "cancer",
+}
+
+LIFE_SCIENCE_CHINESE_TERMS = [
+    "dna",
+    "rna",
+    "DNA",
+    "RNA",
+    "基因",
+    "基因组",
+    "测序",
+    "表观遗传",
+    "甲基化",
+    "基因编辑",
+    "病毒",
+    "蛋白质",
+]
+
+SUPPORTING_PAPER_LIMIT = 12
 
 
 def normalize_arxiv_query(topic: str) -> str:
@@ -94,18 +184,18 @@ def normalize_arxiv_query(topic: str) -> str:
     if not stripped:
         return "agent memory"
     if re.search(r"[\u4e00-\u9fff]", topic):
-        lowered = topic.lower()
         if is_agent_memory_topic(topic):
             return "agent memory large language model"
         mapped_terms: List[str] = []
         for chinese_term, english_terms in CHINESE_QUERY_TERMS.items():
             if chinese_term in topic:
                 mapped_terms.extend(keyword_tokens(english_terms))
-        embedded_english = keyword_tokens(lowered)
+        embedded_english = keyword_tokens(clean_chinese_research_prompt(topic))
         mapped_terms.extend(embedded_english)
         if mapped_terms:
             return " ".join(dict.fromkeys(mapped_terms))
-        return stripped
+        cleaned = clean_chinese_research_prompt(stripped)
+        return cleaned or stripped
     return stripped
 
 
@@ -119,6 +209,21 @@ def build_arxiv_queries(topic: str) -> List[str]:
             '(all:"LLM agent" AND all:"memory")',
             '(all:"long-term memory" AND all:"agent")',
         ]
+    if is_life_science_topic(topic):
+        tokens = life_science_topic_tokens(topic)
+        if not tokens:
+            tokens = keyword_tokens(normalized)
+        field_query = " OR ".join(
+            f'ti:"{token}" OR abs:"{token}"' for token in tokens[:8]
+        )
+        broad_query = " OR ".join(f"all:{token}" for token in tokens[:8])
+        primary = tokens[0]
+        themed = " OR ".join(f"all:{token}" for token in tokens[1:6])
+        return [
+            f"({field_query})",
+            f"({broad_query})",
+            f"(all:{primary} AND ({themed}))" if themed else f"all:{primary}",
+        ]
     escaped = normalized.replace('"', "")
     tokens = keyword_tokens(escaped)
     if not tokens:
@@ -128,6 +233,27 @@ def build_arxiv_queries(topic: str) -> List[str]:
     )
     and_query = " AND ".join(f'all:"{token}"' for token in tokens[:4])
     return [f"({term_query})", f"({and_query})", f'all:"{escaped}"']
+
+
+def build_pubmed_queries(topic: str) -> List[str]:
+    tokens = life_science_topic_tokens(topic)
+    if not tokens:
+        return []
+    current_year = datetime.now().year
+    title_abs = " OR ".join(f"{token}[Title/Abstract]" for token in tokens[:8])
+    broad = " OR ".join(tokens[:8])
+    return [
+        f"({title_abs}) AND ({current_year - 2}:{current_year}[pdat])",
+        f"({title_abs})",
+        f"({broad}) AND ({current_year - 2}:{current_year}[pdat])",
+    ]
+
+
+def clean_chinese_research_prompt(topic: str) -> str:
+    cleaned = topic
+    for word in CHINESE_INTENT_WORDS:
+        cleaned = cleaned.replace(word, " ")
+    return " ".join(cleaned.split()).strip()
 
 
 def is_agent_memory_topic(topic: str) -> bool:
@@ -151,6 +277,47 @@ def is_atmospheric_optics_topic(topic: str) -> bool:
             "sunrise",
         ]
     )
+
+
+def is_life_science_topic(topic: str) -> bool:
+    normalized = normalize_nonrecursive_terms(topic)
+    tokens = set(keyword_tokens(normalized))
+    if tokens & LIFE_SCIENCE_TERMS:
+        return True
+    return any(term in topic for term in LIFE_SCIENCE_CHINESE_TERMS)
+
+
+def is_recent_topic(topic: str) -> bool:
+    lowered = topic.lower()
+    return any(term in topic for term in ["最近", "近年来", "最新", "近年"]) or any(
+        term in lowered for term in ["recent", "latest", "new"]
+    )
+
+
+def normalize_nonrecursive_terms(topic: str) -> str:
+    text = clean_chinese_research_prompt(topic)
+    mapped_terms: List[str] = []
+    for chinese_term, english_terms in CHINESE_QUERY_TERMS.items():
+        if chinese_term in topic:
+            mapped_terms.extend(keyword_tokens(english_terms))
+    mapped_terms.extend(keyword_tokens(text))
+    return " ".join(dict.fromkeys(mapped_terms)) if mapped_terms else text
+
+
+def life_science_topic_tokens(topic: str) -> List[str]:
+    normalized = normalize_nonrecursive_terms(topic)
+    tokens = [
+        token
+        for token in keyword_tokens(normalized)
+        if token in LIFE_SCIENCE_TERMS or token in SHORT_KEYWORDS
+    ]
+    if "dna" in tokens:
+        tokens.extend(["genomics", "sequencing", "genome", "gene", "epigenetics", "methylation", "repair"])
+    if "virus" in tokens or "viral" in tokens:
+        tokens.extend(["virology", "infection", "vaccine", "pathogen"])
+    if "protein" in tokens:
+        tokens.extend(["structure", "folding", "design", "proteomics"])
+    return list(dict.fromkeys(tokens))
 
 
 def fallback_papers(topic: str, max_results: int) -> List[Paper]:
@@ -238,18 +405,182 @@ def arxiv_search(
     min_relevance: float = 3.0,
     sort_by: str = "relevance",
 ) -> Tuple[List[Paper], List[str], List[Dict[str, Any]], List[str]]:
+    result = research_search(
+        topic=topic,
+        max_results=max_results,
+        timeout=timeout,
+        candidate_pool=candidate_pool,
+        min_relevance=min_relevance,
+        sort_by=sort_by,
+        enable_pubmed=False,
+    )
+    return (
+        result["papers"],
+        result["warnings"],
+        result["rejected_papers"],
+        result["queries"],
+    )
+
+
+def research_search(
+    topic: str,
+    max_results: int = 8,
+    timeout: int = 25,
+    candidate_pool: int = 80,
+    min_relevance: float = 2.0,
+    sort_by: str = "relevance",
+    enable_pubmed: bool = True,
+) -> Dict[str, Any]:
     warnings: List[str] = []
-    queries = build_arxiv_queries(topic)
+    arxiv_queries = build_arxiv_queries(topic)
+    pubmed_queries = build_pubmed_queries(topic) if enable_pubmed and is_life_science_topic(topic) else []
+    diagnostics: Dict[str, Any] = {
+        "domain": infer_topic_domain(topic),
+        "topic_keywords": topic_keywords(topic),
+        "sources": [],
+        "queries": {
+            "arxiv": arxiv_queries,
+            "pubmed": pubmed_queries,
+        },
+    }
     if candidate_pool <= 0:
         if is_agent_memory_topic(topic):
             warnings.append("candidate_pool <= 0; using fallback paper samples without arXiv network access.")
-            return fallback_papers(topic, max_results), warnings, [], queries
+            papers = mark_importance(fallback_papers(topic, max_results), "core")
+            return {
+                "papers": papers,
+                "supporting_papers": [],
+                "warnings": warnings,
+                "rejected_papers": [],
+                "queries": arxiv_queries,
+                "search_diagnostics": diagnostics,
+            }
         warnings.append(
             "candidate_pool <= 0; offline fallback samples are only available for Agent Memory topics."
         )
-        return [], warnings, [], queries
+        return {
+            "papers": [],
+            "supporting_papers": [],
+            "warnings": warnings,
+            "rejected_papers": [],
+            "queries": arxiv_queries,
+            "search_diagnostics": diagnostics,
+        }
+
     all_candidates: Dict[str, Paper] = {}
-    per_query = max(max_results, min(candidate_pool, 10))
+    arxiv_candidates, arxiv_warnings = fetch_arxiv_candidates(
+        topic=topic,
+        queries=arxiv_queries,
+        max_results=max_results,
+        timeout=timeout,
+        candidate_pool=candidate_pool,
+        sort_by=sort_by,
+    )
+    warnings.extend(arxiv_warnings)
+    diagnostics["sources"].append(
+        {
+            "source": "arxiv",
+            "query_count": len(arxiv_queries),
+            "candidate_count": len(arxiv_candidates),
+            "warnings": arxiv_warnings,
+        }
+    )
+    merge_candidates(all_candidates, arxiv_candidates)
+
+    if pubmed_queries:
+        pubmed_candidates, pubmed_warnings = pubmed_search(
+            topic=topic,
+            queries=pubmed_queries,
+            timeout=timeout,
+            candidate_pool=candidate_pool,
+        )
+        warnings.extend(pubmed_warnings)
+        diagnostics["sources"].append(
+            {
+                "source": "pubmed",
+                "query_count": len(pubmed_queries),
+                "candidate_count": len(pubmed_candidates),
+                "warnings": pubmed_warnings,
+            }
+        )
+        merge_candidates(all_candidates, pubmed_candidates)
+
+    accepted, supporting, rejected = split_ranked_papers(
+        all_candidates.values(),
+        max_results=max_results,
+        min_relevance=min_relevance,
+        supporting_limit=SUPPORTING_PAPER_LIMIT,
+    )
+    diagnostics["accepted_count"] = len(accepted)
+    diagnostics["supporting_count"] = len(supporting)
+    diagnostics["rejected_count"] = len(rejected)
+
+    if accepted:
+        if len(accepted) < max_results:
+            warnings.append(
+                f"Only {len(accepted)} papers passed relevance filtering; requested {max_results}."
+            )
+        return {
+            "papers": accepted,
+            "supporting_papers": supporting,
+            "warnings": warnings,
+            "rejected_papers": rejected,
+            "queries": format_search_queries(arxiv_queries, pubmed_queries),
+            "search_diagnostics": diagnostics,
+        }
+
+    if supporting:
+        warnings.append(
+            "No candidates reached the core relevance threshold; promoted the strongest lower-weight candidates."
+        )
+        promoted = mark_importance(supporting[:max_results], "core")
+        remaining_supporting = mark_importance(supporting[max_results:], "supporting")
+        diagnostics["accepted_count"] = len(promoted)
+        diagnostics["supporting_count"] = len(remaining_supporting)
+        return {
+            "papers": promoted,
+            "supporting_papers": remaining_supporting,
+            "warnings": warnings,
+            "rejected_papers": rejected,
+            "queries": format_search_queries(arxiv_queries, pubmed_queries),
+            "search_diagnostics": diagnostics,
+        }
+
+    if is_agent_memory_topic(topic):
+        warnings.append("No arXiv candidates passed relevance filtering; using fallback paper samples.")
+        fallback = mark_importance(fallback_papers(topic, max_results), "core")
+        return {
+            "papers": fallback,
+            "supporting_papers": [],
+            "warnings": warnings,
+            "rejected_papers": rejected,
+            "queries": format_search_queries(arxiv_queries, pubmed_queries),
+            "search_diagnostics": diagnostics,
+        }
+    warnings.append(
+        "No candidates passed relevance filtering for this topic. Try lower Min score, a larger Pool, or upload a PDF."
+    )
+    return {
+        "papers": [],
+        "supporting_papers": [],
+        "warnings": warnings,
+        "rejected_papers": rejected,
+        "queries": format_search_queries(arxiv_queries, pubmed_queries),
+        "search_diagnostics": diagnostics,
+    }
+
+
+def fetch_arxiv_candidates(
+    topic: str,
+    queries: List[str],
+    max_results: int,
+    timeout: int,
+    candidate_pool: int,
+    sort_by: str,
+) -> Tuple[List[Paper], List[str]]:
+    warnings: List[str] = []
+    candidates: List[Paper] = []
+    per_query = max(max_results, min(candidate_pool, 20))
 
     for index, query in enumerate(queries):
         params = {
@@ -265,31 +596,114 @@ def arxiv_search(
             )
             response.raise_for_status()
             for paper in parse_arxiv_response(response.text):
-                key = paper.url or paper.title.lower()
-                existing = all_candidates.get(key)
                 scored = score_paper_relevance(paper, topic)
-                if existing is None or scored.relevance_score > existing.relevance_score:
-                    all_candidates[key] = scored
+                candidates.append(scored)
         except Exception as exc:
             warnings.append(f"arXiv query failed for {query} ({exc}).")
         if index < len(queries) - 1:
             time.sleep(1)
+    return candidates, warnings
 
-    accepted, rejected = filter_relevant_papers(
-        all_candidates.values(), max_results=max_results, min_relevance=min_relevance
-    )
-    if accepted:
-        if len(accepted) < max_results:
-            warnings.append(
-                f"Only {len(accepted)} papers passed relevance filtering; requested {max_results}."
+
+def pubmed_search(
+    topic: str,
+    queries: List[str],
+    timeout: int = 25,
+    candidate_pool: int = 80,
+) -> Tuple[List[Paper], List[str]]:
+    warnings: List[str] = []
+    papers: Dict[str, Paper] = {}
+    per_query = min(max(candidate_pool // max(len(queries), 1), 8), 25)
+    headers = {"User-Agent": "multiple-assistant-agents-course-project/1.0"}
+
+    for query in queries:
+        try:
+            search_response = requests.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                params={
+                    "db": "pubmed",
+                    "term": query,
+                    "retmode": "json",
+                    "retmax": str(per_query),
+                    "sort": "pub date",
+                },
+                timeout=timeout,
+                headers=headers,
             )
-        return accepted, warnings, rejected, queries
+            search_response.raise_for_status()
+            ids = search_response.json().get("esearchresult", {}).get("idlist", [])
+            if not ids:
+                continue
+            summary_response = requests.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+                params={"db": "pubmed", "id": ",".join(ids), "retmode": "json"},
+                timeout=timeout,
+                headers=headers,
+            )
+            summary_response.raise_for_status()
+            summaries = summary_response.json().get("result", {})
+            abstracts = fetch_pubmed_abstracts(ids, timeout, headers)
+            for pmid in ids:
+                item = summaries.get(pmid, {})
+                title = clean_text(str(item.get("title", ""))).rstrip(".")
+                if not title:
+                    continue
+                authors = [
+                    clean_text(author.get("name", ""))
+                    for author in item.get("authors", [])[:8]
+                    if author.get("name")
+                ]
+                pubdate = str(item.get("pubdate", ""))
+                year_match = re.search(r"(19|20)\d{2}", pubdate)
+                year = year_match.group(0) if year_match else "unknown"
+                paper = Paper(
+                    title=title,
+                    authors=authors,
+                    year=year,
+                    summary=abstracts.get(pmid, "") or clean_text(str(item.get("source", ""))),
+                    url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+                    source="pubmed",
+                    domain=infer_topic_domain(topic),
+                    topic_keywords=topic_keywords(topic),
+                )
+                scored = score_paper_relevance(paper, topic)
+                papers[pmid] = scored
+        except Exception as exc:
+            warnings.append(f"PubMed query failed for {query} ({exc}).")
+        time.sleep(0.35)
+    return list(papers.values()), warnings
 
-    if is_agent_memory_topic(topic):
-        warnings.append("No arXiv candidates passed relevance filtering; using fallback paper samples.")
-        return fallback_papers(topic, max_results), warnings, rejected, queries
-    warnings.append("No arXiv candidates passed relevance filtering for this topic.")
-    return [], warnings, rejected, queries
+
+def fetch_pubmed_abstracts(
+    ids: List[str], timeout: int, headers: Dict[str, str]
+) -> Dict[str, str]:
+    if not ids:
+        return {}
+    try:
+        response = requests.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+            params={"db": "pubmed", "id": ",".join(ids), "retmode": "xml"},
+            timeout=timeout,
+            headers=headers,
+        )
+        response.raise_for_status()
+        return parse_pubmed_abstracts(response.text)
+    except Exception:
+        return {}
+
+
+def parse_pubmed_abstracts(xml_text: str) -> Dict[str, str]:
+    root = ET.fromstring(xml_text)
+    abstracts: Dict[str, str] = {}
+    for article in root.findall(".//PubmedArticle"):
+        pmid = article.findtext(".//PMID", default="")
+        chunks = [
+            clean_text("".join(abstract.itertext()))
+            for abstract in article.findall(".//AbstractText")
+        ]
+        if pmid:
+            abstracts[pmid] = clean_text(" ".join(chunk for chunk in chunks if chunk))
+    return abstracts
 
 
 def parse_arxiv_response(xml_text: str) -> List[Paper]:
@@ -323,6 +737,7 @@ def parse_arxiv_response(xml_text: str) -> List[Paper]:
                     summary=summary,
                     url=url,
                     pdf_url=pdf_url,
+                    source="arxiv",
                 )
             )
     return papers
@@ -335,6 +750,7 @@ def score_paper_relevance(paper: Paper, topic: str) -> Paper:
     score = 0.0
     matched_terms: List[str] = []
     agent_memory_topic = is_agent_memory_topic(topic)
+    life_science_topic = is_life_science_topic(topic)
 
     if agent_memory_topic:
         for phrase, weight in POSITIVE_PATTERNS.items():
@@ -361,15 +777,17 @@ def score_paper_relevance(paper: Paper, topic: str) -> Paper:
         for token in keyword_tokens(normalize_arxiv_query(topic))
         if token not in {"recent", "research", "direction", "directions"}
     }
+    if life_science_topic:
+        topic_tokens.update(life_science_topic_tokens(topic))
     candidate_tokens = set(keyword_tokens(combined))
     overlap = sorted(topic_tokens & candidate_tokens)
-    score += min(len(overlap), 5) * 1.2
+    score += min(len(overlap), 7) * 1.25
     matched_terms.extend(overlap)
     for token in topic_tokens:
         if token in title:
-            score += 0.8
+            score += 1.0
         elif token in summary:
-            score += 0.35
+            score += 0.45
 
     for phrase, penalty in NEGATIVE_PATTERNS.items():
         if phrase in combined:
@@ -398,16 +816,120 @@ def score_paper_relevance(paper: Paper, topic: str) -> Paper:
         else:
             score -= 3.0
 
+    if life_science_topic:
+        life_overlap = sorted(LIFE_SCIENCE_TERMS & candidate_tokens)
+        if life_overlap:
+            score += min(len(life_overlap), 5) * 0.45
+            matched_terms.extend(life_overlap)
+        else:
+            score -= 1.5
+        if paper.source == "pubmed":
+            score += 0.8
+            matched_terms.append("pubmed")
+
     if paper.year.isdigit():
         year = int(paper.year)
-        if year >= 2023:
+        current_year = datetime.now().year
+        recent_topic = is_recent_topic(topic)
+        if year >= current_year - 2:
+            score += 1.4 if recent_topic else 0.8
+        elif year >= 2023:
             score += 0.5
+        elif life_science_topic and year < current_year - 5:
+            score -= 3.0
         elif year < 2020:
             score -= 0.5
+        if recent_topic and year < current_year - 3:
+            score -= 2.0
 
     paper.relevance_score = round(score, 3)
     paper.matched_terms = sorted(set(matched_terms))
+    paper.domain = infer_topic_domain(topic)
+    paper.topic_keywords = topic_keywords(topic)
     return paper
+
+
+def merge_candidates(target: Dict[str, Paper], candidates: Iterable[Paper]) -> None:
+    for paper in candidates:
+        key = canonical_paper_key(paper)
+        existing = target.get(key)
+        if existing is None or paper.relevance_score > existing.relevance_score:
+            target[key] = paper
+
+
+def canonical_paper_key(paper: Paper) -> str:
+    title = re.sub(r"[^a-z0-9]+", " ", paper.title.lower()).strip()
+    return paper.url or title
+
+
+def split_ranked_papers(
+    papers: Iterable[Paper],
+    max_results: int,
+    min_relevance: float,
+    supporting_limit: int,
+) -> Tuple[List[Paper], List[Paper], List[Dict[str, Any]]]:
+    ranked = sorted(
+        papers,
+        key=lambda item: (item.relevance_score, item.year if item.year.isdigit() else "0"),
+        reverse=True,
+    )
+    core = [paper for paper in ranked if paper.relevance_score >= min_relevance]
+    lower = [paper for paper in ranked if paper.relevance_score < min_relevance]
+    accepted = mark_importance(core[:max_results], "core")
+    supporting_source = core[max_results:] + lower
+    supporting = mark_importance(supporting_source[:supporting_limit], "supporting")
+    rejected = [
+        rejected_paper_dict(paper, "below supporting relevance")
+        for paper in supporting_source[supporting_limit:]
+    ]
+    return accepted, supporting, rejected
+
+
+def mark_importance(papers: Iterable[Paper], importance: str) -> List[Paper]:
+    marked = []
+    for paper in papers:
+        paper.importance = importance
+        marked.append(paper)
+    return marked
+
+
+def rejected_paper_dict(paper: Paper, reason: str) -> Dict[str, Any]:
+    return {
+        "title": paper.title,
+        "year": paper.year,
+        "url": paper.url,
+        "source": paper.source,
+        "relevance_score": paper.relevance_score,
+        "matched_terms": paper.matched_terms or [],
+        "reason": reason,
+    }
+
+
+def format_search_queries(arxiv_queries: List[str], pubmed_queries: List[str]) -> List[str]:
+    formatted = [f"arXiv: {query}" for query in arxiv_queries]
+    formatted.extend(f"PubMed: {query}" for query in pubmed_queries)
+    return formatted
+
+
+def infer_topic_domain(topic: str) -> str:
+    if is_agent_memory_topic(topic):
+        return "agent-memory"
+    if is_atmospheric_optics_topic(topic):
+        return "atmospheric-optics"
+    if is_life_science_topic(topic):
+        return "life-science"
+    lowered = topic.lower()
+    if any(term in lowered for term in ["ai", "artificial intelligence", "machine learning", "deep learning"]):
+        return "ai"
+    return "general"
+
+
+def topic_keywords(topic: str) -> List[str]:
+    normalized = normalize_arxiv_query(topic)
+    tokens = keyword_tokens(normalized)
+    if is_life_science_topic(topic):
+        tokens.extend(life_science_topic_tokens(topic))
+    return list(dict.fromkeys(tokens))[:12]
 
 
 def filter_relevant_papers(
@@ -490,8 +1012,11 @@ def paper_stats(papers: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def keyword_tokens(text: str) -> List[str]:
-    return [
-        token.lower()
-        for token in re.findall(r"[A-Za-z][A-Za-z\-]{3,}", text)
-        if token.lower() not in STOPWORDS
-    ]
+    tokens: List[str] = []
+    for token in re.findall(r"[A-Za-z][A-Za-z0-9\-]*", text):
+        lowered = token.lower()
+        if lowered in STOPWORDS:
+            continue
+        if len(lowered) >= 4 or lowered in SHORT_KEYWORDS:
+            tokens.append(lowered)
+    return tokens
