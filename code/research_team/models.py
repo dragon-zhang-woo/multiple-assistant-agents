@@ -64,6 +64,12 @@ class ResearchState(TypedDict, total=False):
     pdf_notes: List[Dict[str, str]]
     stats: Dict[str, Any]
     plan: str
+    topic_profile: Dict[str, Any]
+    llm_keywords: List[str]
+    react_trace: List[Dict[str, Any]]
+    critic_decision: Dict[str, Any]
+    critic_retries: int
+    critic_retries_done: int
     critique_summary: str
     report_path: str
     mindmap_path: str
@@ -77,3 +83,17 @@ class ResearchState(TypedDict, total=False):
     run_name: str
     started_at: str
     completed_at: str
+    semantic_memory: Dict[str, Any]
+    procedural_memory: Dict[str, Any]
+    semantic_memory_path: str
+    procedural_memory_path: str
+    executive_summary: str
+    direction_narratives: Dict[str, str]
+    paper_highlights: List[Dict[str, Any]]
+    comparison_table: List[Dict[str, str]]
+    future_work: List[str]
+    glossary: List[Dict[str, str]]
+    references_apa: List[str]
+    citation_metrics: List[Dict[str, Any]]
+    calc_logs: List[Dict[str, Any]]
+    rewrite_history: List[Dict[str, Any]]

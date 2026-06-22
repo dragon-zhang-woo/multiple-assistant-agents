@@ -15,7 +15,7 @@ from research_team.agents import (
     add_message,
 )
 from research_team.llm import build_llm
-from research_team.memory import LongTermMemory
+from research_team.memory import LongTermMemory, ProceduralMemory, SemanticMemory
 from research_team.models import ResearchState
 
 EventSink = Callable[[Dict[str, Any]], None]
@@ -75,6 +75,12 @@ def run_research_workflow(
     add_message(state, "System", "Start Research Agent Team workflow.")
 
     memory = LongTermMemory(memory_path)
+    semantic_memory_path = memory_path.parent / (memory_path.stem + "_semantic.json")
+    procedural_memory_path = memory_path.parent / (memory_path.stem + "_procedural.json")
+    semantic_memory = SemanticMemory(semantic_memory_path)
+    procedural_memory = ProceduralMemory(procedural_memory_path)
+    state["semantic_memory_path"] = str(semantic_memory_path)
+    state["procedural_memory_path"] = str(procedural_memory_path)
     agents = {
         "manager": ManagerAgent(),
         "search": SearchAgent(),
@@ -89,18 +95,53 @@ def run_research_workflow(
     def memory_retrieve_node(current: ResearchState) -> ResearchState:
         retrieved = memory.retrieve(current["topic"])
         current["retrieved_memories"] = retrieved
+        # Pull semantic + procedural memory using the domain inferred earlier.
+        domain = (current.get("topic_profile") or {}).get("domain") or "general"
+        try:
+            current["semantic_memory"] = semantic_memory.retrieve(domain)
+        except Exception:
+            current["semantic_memory"] = {}
+        try:
+            current["procedural_memory"] = procedural_memory.retrieve(domain)
+        except Exception:
+            current["procedural_memory"] = {}
         current.setdefault("tool_logs", []).append(
-            {"tool": "memory_retrieve", "memory_count": len(retrieved)}
+            {
+                "tool": "memory_retrieve",
+                "memory_count": len(retrieved),
+                "semantic_directions": len(
+                    (current["semantic_memory"] or {}).get("directions", []) or []
+                ),
+                "procedural_queries": len(
+                    (current["procedural_memory"] or {}).get("effective_queries", []) or []
+                ),
+            }
         )
         add_message(
             current,
             "Memory",
-            f"Retrieved {len(retrieved)} related long-term memory entries.",
+            f"Retrieved {len(retrieved)} episodic + "
+            f"{len((current['semantic_memory'] or {}).get('directions', []) or [])} semantic + "
+            f"{len((current['procedural_memory'] or {}).get('effective_queries', []) or [])} procedural memory entries.",
         )
         return current
 
     def search_node(current: ResearchState) -> ResearchState:
-        return agents["search"].run(current, llm)
+        before_paper_count = len(current.get("papers", []))
+        current = agents["search"].run(current, llm)
+        # Procedural memory bookkeeping: which queries did we run, did we get hits?
+        domain = (current.get("topic_profile") or {}).get("domain") or "general"
+        queries = current.get("search_queries", []) or []
+        paper_count_after = len(current.get("papers", []))
+        try:
+            procedural_memory.record_search(
+                domain=domain,
+                queries=queries,
+                paper_count=max(paper_count_after, paper_count_after - before_paper_count),
+            )
+        except Exception:
+            pass
+        return current
 
     def read_node(current: ResearchState) -> ResearchState:
         return agents["read"].run(current, llm)
@@ -118,10 +159,30 @@ def run_research_workflow(
             analyses=current.get("paper_analyses", []),
             report_path=current.get("report_path", ""),
         )
+        # Distill semantic memory from this run's analyses + critique.
+        domain = (current.get("topic_profile") or {}).get("domain") or "general"
+        try:
+            semantic_memory.update_from_run(
+                domain=domain,
+                topic_profile=current.get("topic_profile") or {},
+                analyses=current.get("paper_analyses", []) or [],
+                critique=current.get("critique_summary", "") or "",
+            )
+        except Exception:
+            pass
         current.setdefault("tool_logs", []).append(
-            {"tool": "memory_update", "memory_path": str(memory_path)}
+            {
+                "tool": "memory_update",
+                "memory_path": str(memory_path),
+                "semantic_memory_path": str(semantic_memory_path),
+                "procedural_memory_path": str(procedural_memory_path),
+            }
         )
-        add_message(current, "Memory", "Updated long-term memory.")
+        add_message(
+            current,
+            "Memory",
+            "Updated episodic + semantic + procedural memory.",
+        )
         return current
 
     nodes = [
@@ -143,7 +204,9 @@ def run_research_workflow(
             "detail": f"Research topic: {topic}",
         },
     )
-    state = run_with_langgraph_if_available(state, instrument_nodes(nodes, event_sink))
+    state = run_with_langgraph_if_available(
+        state, instrument_nodes(nodes, event_sink), max_critic_retries=1
+    )
     state["completed_at"] = datetime.now().isoformat(timespec="seconds")
     write_run_log(state)
     if latest_dir:
@@ -248,8 +311,23 @@ def summarize_node_result(node_name: str, state: ResearchState) -> str:
 
 
 def run_with_langgraph_if_available(
-    state: ResearchState, nodes: List[tuple[str, Callable[[ResearchState], ResearchState]]]
+    state: ResearchState,
+    nodes: List[tuple[str, Callable[[ResearchState], ResearchState]]],
+    max_critic_retries: int = 1,
 ) -> ResearchState:
+    node_map = {name: func for name, func in nodes}
+
+    def should_retry(current: ResearchState) -> str:
+        decision = current.get("critic_decision") or {}
+        retries_used = int(current.get("critic_retries_done", 0))
+        if (
+            decision.get("needs_more_search")
+            and retries_used < max_critic_retries
+        ):
+            current["critic_retries_done"] = retries_used + 1
+            return "retry"
+        return "advance"
+
     try:
         from langgraph.graph import END, StateGraph
     except Exception:
@@ -257,21 +335,39 @@ def run_with_langgraph_if_available(
             "LangGraph is not installed; executed the same workflow sequentially."
         )
         state["workflow_engine"] = "sequential-fallback"
-        for _, node in nodes:
-            state = node(state)
-        return state
+        return _run_sequential_with_retry(state, nodes, max_critic_retries, should_retry)
 
     try:
         graph = StateGraph(ResearchState)
         for name, node in nodes:
             graph.add_node(name, node)
+        # Linear edges, except critique which is conditional.
         for (name, _), (next_name, _) in zip(nodes, nodes[1:]):
+            if name == "critique":
+                continue
             graph.add_edge(name, next_name)
+        graph.add_conditional_edges(
+            "critique",
+            should_retry,
+            {"retry": "search", "advance": "write"},
+        )
         graph.add_edge(nodes[-1][0], END)
         graph.set_entry_point(nodes[0][0])
-        app = graph.compile()
+        compile_kwargs: Dict[str, Any] = {}
+        checkpointer = _build_checkpointer(state)
+        if checkpointer is not None:
+            compile_kwargs["checkpointer"] = checkpointer
+            state["checkpointer"] = "sqlite"
+        app = graph.compile(**compile_kwargs)
         state["workflow_engine"] = "langgraph"
-        final_state = app.invoke(state)
+        invoke_kwargs: Dict[str, Any] = {}
+        if checkpointer is not None:
+            invoke_kwargs["config"] = {
+                "configurable": {
+                    "thread_id": state.get("run_name") or "default",
+                }
+            }
+        final_state = app.invoke(state, **invoke_kwargs) if invoke_kwargs else app.invoke(state)
         final_state["workflow_engine"] = "langgraph"
         return final_state
     except Exception as exc:
@@ -279,9 +375,51 @@ def run_with_langgraph_if_available(
             f"LangGraph execution failed ({exc}); executed sequential fallback."
         )
         state["workflow_engine"] = "sequential-fallback"
-        for _, node in nodes:
-            state = node(state)
+        return _run_sequential_with_retry(state, nodes, max_critic_retries, should_retry)
+
+
+def _run_sequential_with_retry(
+    state: ResearchState,
+    nodes: List[tuple[str, Callable[[ResearchState], ResearchState]]],
+    max_critic_retries: int,
+    should_retry: Callable[[ResearchState], str],
+) -> ResearchState:
+    """Sequential fallback that also honors the Reflexion retry edge."""
+    pre_critique: List[tuple[str, Callable[[ResearchState], ResearchState]]] = []
+    post_critique: List[tuple[str, Callable[[ResearchState], ResearchState]]] = []
+    critique_node = None
+    seen_critique = False
+    for name, func in nodes:
+        if name == "critique":
+            critique_node = func
+            seen_critique = True
+            continue
+        if not seen_critique:
+            pre_critique.append((name, func))
+        else:
+            post_critique.append((name, func))
+
+    for _, func in pre_critique:
+        state = func(state)
+
+    if critique_node is None:
+        for _, func in post_critique:
+            state = func(state)
         return state
+
+    while True:
+        state = critique_node(state)
+        action = should_retry(state)
+        if action != "retry":
+            break
+        # Replay search → read before re-running critique.
+        for name, func in pre_critique:
+            if name in {"search", "read"}:
+                state = func(state)
+
+    for _, func in post_critique:
+        state = func(state)
+    return state
 
 
 def write_run_log(state: ResearchState) -> None:
@@ -300,3 +438,29 @@ def publish_latest(output_dir: Path, latest_dir: Path) -> None:
     if latest_dir.exists():
         shutil.rmtree(latest_dir)
     shutil.copytree(output_dir, latest_dir)
+
+
+def _build_checkpointer(state: ResearchState):
+    """Best-effort SqliteSaver instantiation. Returns ``None`` when the
+    optional dependency is missing so callers can degrade gracefully."""
+    try:
+        from langgraph.checkpoint.sqlite import SqliteSaver
+    except Exception:
+        try:
+            from langgraph.checkpoint.memory import MemorySaver
+
+            return MemorySaver()
+        except Exception:
+            return None
+    try:
+        output_dir = Path(state.get("output_dir") or "outputs")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        db_path = output_dir / "checkpoints.sqlite"
+        return SqliteSaver.from_conn_string(str(db_path))
+    except Exception:
+        try:
+            from langgraph.checkpoint.memory import MemorySaver
+
+            return MemorySaver()
+        except Exception:
+            return None

@@ -179,40 +179,60 @@ LIFE_SCIENCE_CHINESE_TERMS = [
 SUPPORTING_PAPER_LIMIT = 12
 
 
-def normalize_arxiv_query(topic: str) -> str:
+def normalize_arxiv_query(topic: str, extra_keywords: List[str] | None = None) -> str:
     stripped = topic.strip()
-    if not stripped:
+    extras = [kw.strip() for kw in (extra_keywords or []) if kw and kw.strip()]
+    if not stripped and not extras:
         return "agent memory"
     if re.search(r"[\u4e00-\u9fff]", topic):
         if is_agent_memory_topic(topic):
-            return "agent memory large language model"
+            base = "agent memory large language model"
+            return f"{base} {' '.join(extras)}".strip() if extras else base
         mapped_terms: List[str] = []
         for chinese_term, english_terms in CHINESE_QUERY_TERMS.items():
             if chinese_term in topic:
                 mapped_terms.extend(keyword_tokens(english_terms))
         embedded_english = keyword_tokens(clean_chinese_research_prompt(topic))
         mapped_terms.extend(embedded_english)
+        for token in extras:
+            mapped_terms.extend(keyword_tokens(token))
         if mapped_terms:
             return " ".join(dict.fromkeys(mapped_terms))
         cleaned = clean_chinese_research_prompt(stripped)
+        if extras:
+            return (cleaned + " " + " ".join(extras)).strip() if cleaned else " ".join(extras)
         return cleaned or stripped
+    if extras:
+        return (stripped + " " + " ".join(extras)).strip()
     return stripped
 
 
-def build_arxiv_queries(topic: str) -> List[str]:
-    normalized = normalize_arxiv_query(topic)
+def build_arxiv_queries(
+    topic: str, extra_keywords: List[str] | None = None
+) -> List[str]:
+    normalized = normalize_arxiv_query(topic, extra_keywords)
     lowered = normalized.lower()
+    extras = [kw.strip() for kw in (extra_keywords or []) if kw and kw.strip()]
     if "agent" in lowered and "memory" in lowered:
-        return [
+        base = [
             'all:"agent memory"',
             '(ti:"agent memory" OR abs:"agent memory" OR ti:"memory augmented agent" OR abs:"memory augmented agent")',
             '(all:"LLM agent" AND all:"memory")',
             '(all:"long-term memory" AND all:"agent")',
         ]
+        if extras:
+            extra_field = " OR ".join(
+                f'ti:"{kw}" OR abs:"{kw}"' for kw in extras[:6]
+            )
+            base.append(f"({extra_field})")
+        return base
     if is_life_science_topic(topic):
         tokens = life_science_topic_tokens(topic)
         if not tokens:
             tokens = keyword_tokens(normalized)
+        for kw in extras:
+            tokens.extend(keyword_tokens(kw))
+        tokens = list(dict.fromkeys(tokens))
         field_query = " OR ".join(
             f'ti:"{token}" OR abs:"{token}"' for token in tokens[:8]
         )
@@ -226,6 +246,9 @@ def build_arxiv_queries(topic: str) -> List[str]:
         ]
     escaped = normalized.replace('"', "")
     tokens = keyword_tokens(escaped)
+    for kw in extras:
+        tokens.extend(keyword_tokens(kw))
+    tokens = list(dict.fromkeys(tokens))
     if not tokens:
         return [f'all:"{escaped}"']
     term_query = " OR ".join(
@@ -235,10 +258,34 @@ def build_arxiv_queries(topic: str) -> List[str]:
     return [f"({term_query})", f"({and_query})", f'all:"{escaped}"']
 
 
-def build_pubmed_queries(topic: str) -> List[str]:
+def build_pubmed_queries(
+    topic: str, extra_keywords: List[str] | None = None
+) -> List[str]:
     tokens = life_science_topic_tokens(topic)
+    extras = [kw.strip() for kw in (extra_keywords or []) if kw and kw.strip()]
+    for kw in extras:
+        tokens.extend(keyword_tokens(kw))
+    tokens = list(dict.fromkeys(tokens))
     if not tokens:
-        return []
+        # Even without life-science tokens, build a generic PubMed query if
+        # the LLM provided English keywords — this lets non-built-in topics
+        # (e.g. cordyceps) reach PubMed.
+        if not extras:
+            return []
+        generic_tokens: List[str] = []
+        for kw in extras:
+            generic_tokens.extend(keyword_tokens(kw))
+        generic_tokens = list(dict.fromkeys(generic_tokens))
+        if not generic_tokens:
+            return []
+        current_year = datetime.now().year
+        title_abs = " OR ".join(
+            f"{token}[Title/Abstract]" for token in generic_tokens[:8]
+        )
+        return [
+            f"({title_abs}) AND ({current_year - 4}:{current_year}[pdat])",
+            f"({title_abs})",
+        ]
     current_year = datetime.now().year
     title_abs = " OR ".join(f"{token}[Title/Abstract]" for token in tokens[:8])
     broad = " OR ".join(tokens[:8])
@@ -430,13 +477,20 @@ def research_search(
     min_relevance: float = 2.0,
     sort_by: str = "relevance",
     enable_pubmed: bool = True,
+    extra_keywords: List[str] | None = None,
 ) -> Dict[str, Any]:
     warnings: List[str] = []
-    arxiv_queries = build_arxiv_queries(topic)
-    pubmed_queries = build_pubmed_queries(topic) if enable_pubmed and is_life_science_topic(topic) else []
+    arxiv_queries = build_arxiv_queries(topic, extra_keywords)
+    if enable_pubmed and (
+        is_life_science_topic(topic) or _llm_extras_suggest_pubmed(extra_keywords)
+    ):
+        pubmed_queries = build_pubmed_queries(topic, extra_keywords)
+    else:
+        pubmed_queries = []
     diagnostics: Dict[str, Any] = {
         "domain": infer_topic_domain(topic),
-        "topic_keywords": topic_keywords(topic),
+        "topic_keywords": topic_keywords(topic, extra_keywords),
+        "extra_keywords": list(extra_keywords or []),
         "sources": [],
         "queries": {
             "arxiv": arxiv_queries,
@@ -475,6 +529,7 @@ def research_search(
         timeout=timeout,
         candidate_pool=candidate_pool,
         sort_by=sort_by,
+        extra_keywords=extra_keywords,
     )
     warnings.extend(arxiv_warnings)
     diagnostics["sources"].append(
@@ -493,6 +548,7 @@ def research_search(
             queries=pubmed_queries,
             timeout=timeout,
             candidate_pool=candidate_pool,
+            extra_keywords=extra_keywords,
         )
         warnings.extend(pubmed_warnings)
         diagnostics["sources"].append(
@@ -577,6 +633,7 @@ def fetch_arxiv_candidates(
     timeout: int,
     candidate_pool: int,
     sort_by: str,
+    extra_keywords: List[str] | None = None,
 ) -> Tuple[List[Paper], List[str]]:
     warnings: List[str] = []
     candidates: List[Paper] = []
@@ -596,7 +653,7 @@ def fetch_arxiv_candidates(
             )
             response.raise_for_status()
             for paper in parse_arxiv_response(response.text):
-                scored = score_paper_relevance(paper, topic)
+                scored = score_paper_relevance(paper, topic, extra_keywords)
                 candidates.append(scored)
         except Exception as exc:
             warnings.append(f"arXiv query failed for {query} ({exc}).")
@@ -610,6 +667,7 @@ def pubmed_search(
     queries: List[str],
     timeout: int = 25,
     candidate_pool: int = 80,
+    extra_keywords: List[str] | None = None,
 ) -> Tuple[List[Paper], List[str]]:
     warnings: List[str] = []
     papers: Dict[str, Paper] = {}
@@ -664,9 +722,9 @@ def pubmed_search(
                     url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
                     source="pubmed",
                     domain=infer_topic_domain(topic),
-                    topic_keywords=topic_keywords(topic),
+                    topic_keywords=topic_keywords(topic, extra_keywords),
                 )
-                scored = score_paper_relevance(paper, topic)
+                scored = score_paper_relevance(paper, topic, extra_keywords)
                 papers[pmid] = scored
         except Exception as exc:
             warnings.append(f"PubMed query failed for {query} ({exc}).")
@@ -743,7 +801,9 @@ def parse_arxiv_response(xml_text: str) -> List[Paper]:
     return papers
 
 
-def score_paper_relevance(paper: Paper, topic: str) -> Paper:
+def score_paper_relevance(
+    paper: Paper, topic: str, extra_keywords: List[str] | None = None
+) -> Paper:
     title = paper.title.lower()
     summary = paper.summary.lower()
     combined = f"{title} {summary}"
@@ -774,7 +834,7 @@ def score_paper_relevance(paper: Paper, topic: str) -> Paper:
 
     topic_tokens = {
         token
-        for token in keyword_tokens(normalize_arxiv_query(topic))
+        for token in keyword_tokens(normalize_arxiv_query(topic, extra_keywords))
         if token not in {"recent", "research", "direction", "directions"}
     }
     if life_science_topic:
@@ -788,6 +848,20 @@ def score_paper_relevance(paper: Paper, topic: str) -> Paper:
             score += 1.0
         elif token in summary:
             score += 0.45
+
+    # LLM-suggested keywords (CoT topic profile) get an extra boost when they
+    # appear in the paper. This is what rescues cold topics like 虫草菌 that
+    # neither hit life-science nor agent-memory heuristics.
+    extras_tokens: set = set()
+    for kw in extra_keywords or []:
+        extras_tokens.update(keyword_tokens(kw))
+    extras_overlap = sorted(extras_tokens & candidate_tokens)
+    if extras_overlap:
+        score += min(len(extras_overlap), 6) * 1.1
+        matched_terms.extend(extras_overlap)
+        for token in extras_overlap:
+            if token in title:
+                score += 0.6
 
     for phrase, penalty in NEGATIVE_PATTERNS.items():
         if phrase in combined:
@@ -845,7 +919,7 @@ def score_paper_relevance(paper: Paper, topic: str) -> Paper:
     paper.relevance_score = round(score, 3)
     paper.matched_terms = sorted(set(matched_terms))
     paper.domain = infer_topic_domain(topic)
-    paper.topic_keywords = topic_keywords(topic)
+    paper.topic_keywords = topic_keywords(topic, extra_keywords)
     return paper
 
 
@@ -924,12 +998,52 @@ def infer_topic_domain(topic: str) -> str:
     return "general"
 
 
-def topic_keywords(topic: str) -> List[str]:
-    normalized = normalize_arxiv_query(topic)
+def topic_keywords(
+    topic: str, extra_keywords: List[str] | None = None
+) -> List[str]:
+    normalized = normalize_arxiv_query(topic, extra_keywords)
     tokens = keyword_tokens(normalized)
     if is_life_science_topic(topic):
         tokens.extend(life_science_topic_tokens(topic))
+    for kw in extra_keywords or []:
+        tokens.extend(keyword_tokens(kw))
     return list(dict.fromkeys(tokens))[:12]
+
+
+def _llm_extras_suggest_pubmed(extra_keywords: List[str] | None) -> bool:
+    """Heuristic: when the LLM-supplied keywords contain biomedical hints,
+    enable a PubMed sweep even if the topic itself failed the built-in
+    life-science check (e.g. 虫草菌)."""
+    if not extra_keywords:
+        return False
+    bio_hints = {
+        "cordyceps",
+        "ophiocordyceps",
+        "fungi",
+        "fungal",
+        "mycelium",
+        "mycology",
+        "metabolite",
+        "bioactive",
+        "pharmacology",
+        "antitumor",
+        "antiviral",
+        "antibacterial",
+        "clinical",
+        "biomedical",
+        "medicinal",
+        "herbal",
+        "antibody",
+        "in vivo",
+        "in vitro",
+    }
+    joined = " ".join(extra_keywords).lower()
+    if any(hint in joined for hint in bio_hints):
+        return True
+    tokens = set()
+    for kw in extra_keywords:
+        tokens.update(keyword_tokens(kw))
+    return bool(tokens & LIFE_SCIENCE_TERMS)
 
 
 def filter_relevant_papers(
@@ -1020,3 +1134,161 @@ def keyword_tokens(text: str) -> List[str]:
         if len(lowered) >= 4 or lowered in SHORT_KEYWORDS:
             tokens.append(lowered)
     return tokens
+
+
+# ---------------------------------------------------------------------------
+# Extra tools (math, citation graph, query rewrite) — exposed so any Agent
+# can call them and the call is captured in state["tool_logs"].
+# ---------------------------------------------------------------------------
+
+_SAFE_MATH_NAMES = {
+    "abs": abs, "min": min, "max": max, "round": round, "sum": sum,
+    "len": len, "pow": pow, "int": int, "float": float,
+}
+
+
+def math_calc(expression: str, variables: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Evaluate a small arithmetic expression in a restricted namespace.
+
+    The expression can reference ``variables`` keys plus ``abs/min/max/round/
+    sum/len/pow/int/float``. Anything else (imports, attribute access,
+    builtins) is rejected. Returns ``{"expression", "result", "error"}``.
+    """
+    safe_vars: Dict[str, Any] = {}
+    for name, value in (variables or {}).items():
+        if not isinstance(name, str) or not name.isidentifier():
+            continue
+        safe_vars[name] = value
+    if not isinstance(expression, str) or not expression.strip():
+        return {"expression": expression, "result": None, "error": "empty expression"}
+    if any(token in expression for token in ["__", "import", "open", "exec", "eval", ";"]):
+        return {"expression": expression, "result": None, "error": "forbidden token"}
+    try:
+        compiled = compile(expression, "<math_calc>", "eval")
+        for node_name in compiled.co_names:
+            if node_name in safe_vars or node_name in _SAFE_MATH_NAMES:
+                continue
+            return {
+                "expression": expression,
+                "result": None,
+                "error": f"name '{node_name}' not allowed",
+            }
+        result = eval(compiled, {"__builtins__": {}}, {**_SAFE_MATH_NAMES, **safe_vars})  # noqa: S307
+    except Exception as exc:
+        return {"expression": expression, "result": None, "error": str(exc)}
+    return {"expression": expression, "result": result, "error": ""}
+
+
+def query_rewrite_llm(
+    topic: str,
+    failed_keywords: Iterable[str],
+    llm: Any | None,
+) -> Dict[str, Any]:
+    """Ask the LLM for refined English keywords given a failing search.
+
+    Returns ``{"keywords": List[str], "rationale": str}``. Falls back to a
+    deterministic synonym list when no LLM is available.
+    """
+    if llm is None or getattr(llm, "mode", "") == "base":
+        return _fallback_query_rewrite(topic, failed_keywords)
+    system_prompt = (
+        "You are QueryRewriter. The previous arXiv/PubMed search returned no "
+        "relevant papers. Generate 4-8 alternative English keywords, including "
+        "Latin / scientific names where possible. Return strict JSON."
+    )
+    user_prompt = (
+        f"用户主题：{topic}\n"
+        f"已失败的关键词：{', '.join(failed_keywords) if failed_keywords else '(none)'}\n"
+        "请输出 query_rewrite_json:\n"
+        '{"keywords": [<4-8个英文关键词>], "rationale": <30-80字解释>}\n'
+        "只输出 JSON。"
+    )
+    try:
+        raw = llm.invoke(system_prompt, user_prompt)
+    except Exception:
+        return _fallback_query_rewrite(topic, failed_keywords)
+    try:
+        import json as _json
+        text = raw.strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.lower().startswith("json"):
+                text = text[4:].strip()
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end <= start:
+            return _fallback_query_rewrite(topic, failed_keywords)
+        data = _json.loads(text[start : end + 1])
+    except Exception:
+        return _fallback_query_rewrite(topic, failed_keywords)
+    keywords = data.get("keywords", [])
+    if isinstance(keywords, str):
+        keywords = [kw.strip() for kw in keywords.split(",") if kw.strip()]
+    if not isinstance(keywords, list):
+        keywords = []
+    keywords = [str(kw).strip() for kw in keywords if str(kw).strip()][:8]
+    if not keywords:
+        return _fallback_query_rewrite(topic, failed_keywords)
+    return {
+        "keywords": keywords,
+        "rationale": str(data.get("rationale", "")).strip(),
+    }
+
+
+def _fallback_query_rewrite(
+    topic: str, failed_keywords: Iterable[str]
+) -> Dict[str, Any]:
+    seeds = list(failed_keywords) or [topic]
+    candidates: List[str] = []
+    for seed in seeds:
+        for token in keyword_tokens(str(seed)):
+            for variant in (token, token + "s", token + "es", token.rstrip("s")):
+                if variant not in candidates and len(variant) >= 3:
+                    candidates.append(variant)
+    if len(candidates) < 4:
+        candidates.extend(["review", "survey", "method", "mechanism", "application"])
+    return {
+        "keywords": candidates[:6],
+        "rationale": "Fallback: morphological variants + generic survey terms.",
+    }
+
+
+def citation_graph(
+    paper_titles: Iterable[str], timeout: int = 8
+) -> List[Dict[str, Any]]:
+    """Look up citation counts from Semantic Scholar.
+
+    The call is wrapped in best-effort error handling and silently returns an
+    empty list when the network is unavailable; CriticAgent and WriterAgent can
+    therefore depend on the tool without fearing crashes.
+    """
+    results: List[Dict[str, Any]] = []
+    for title in paper_titles:
+        title = str(title).strip()
+        if not title:
+            continue
+        record: Dict[str, Any] = {"title": title, "citation_count": None, "error": ""}
+        try:
+            response = requests.get(
+                "https://api.semanticscholar.org/graph/v1/paper/search",
+                params={"query": title, "limit": 1, "fields": "title,citationCount,year,venue"},
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            data = response.json()
+            hit = (data.get("data") or [None])[0]
+            if hit:
+                record.update(
+                    {
+                        "title": hit.get("title") or title,
+                        "year": hit.get("year"),
+                        "venue": hit.get("venue"),
+                        "citation_count": hit.get("citationCount"),
+                    }
+                )
+            else:
+                record["error"] = "no match"
+        except Exception as exc:
+            record["error"] = str(exc)
+        results.append(record)
+    return results
