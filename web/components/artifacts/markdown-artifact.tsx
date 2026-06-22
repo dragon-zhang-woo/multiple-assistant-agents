@@ -14,7 +14,7 @@ type Block =
 export function MarkdownArtifact({ content }: MarkdownArtifactProps) {
   const blocks = parseMarkdown(content || "Artifact is empty.");
   return (
-    <article className="rounded-md border border-border bg-paper p-5 paper-prose">
+    <article className="overflow-hidden rounded-md border border-border/80 bg-paper p-5 paper-prose">
       {blocks.map((block, index) => {
         if (block.type === "heading") {
           const Tag = block.level === 1 ? "h1" : block.level === 2 ? "h2" : "h3";
@@ -34,7 +34,7 @@ export function MarkdownArtifact({ content }: MarkdownArtifactProps) {
         }
         if (block.type === "list") {
           return (
-            <div key={index} className="ml-3 flex gap-2 text-sm leading-7">
+            <div key={index} className="ml-3 flex gap-2 break-words text-sm leading-7">
               <span className="mt-[0.65em] h-1 w-1 shrink-0 rounded-full bg-muted-foreground" />
               <span>{block.text}</span>
             </div>
@@ -54,7 +54,7 @@ export function MarkdownArtifact({ content }: MarkdownArtifactProps) {
           );
         }
         return (
-          <p key={index} className="text-sm leading-7 text-foreground">
+          <p key={index} className="break-words text-sm leading-7 text-foreground">
             {block.text}
           </p>
         );
@@ -66,8 +66,8 @@ export function MarkdownArtifact({ content }: MarkdownArtifactProps) {
 function MarkdownTable({ rows }: { rows: string[][] }) {
   const [header, ...body] = rows;
   return (
-    <div className="my-3 overflow-x-auto rounded-md border border-border">
-      <table className="w-full min-w-[520px] border-collapse text-left text-xs">
+    <div className="my-3 overflow-x-auto rounded-md border border-border/80 quiet-scrollbar">
+      <table className="min-w-[720px] border-collapse text-left text-xs">
         {header && (
           <thead className="bg-background">
             <tr>

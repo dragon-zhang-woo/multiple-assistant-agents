@@ -49,7 +49,7 @@ export function MainThread({
 }: MainThreadProps) {
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col bg-paper">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-5">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border/70 px-5">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{project.name}</div>
           <div className="truncate text-xs text-muted-foreground">

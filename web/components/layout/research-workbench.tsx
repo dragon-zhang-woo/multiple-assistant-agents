@@ -25,6 +25,11 @@ export function ResearchWorkbench() {
           onCreateThread={thread.createNewThread}
           searchQuery={thread.searchQuery}
           onSearchQueryChange={thread.setSearchQuery}
+          historyLoaded={thread.historyLoaded}
+          showArchived={thread.showArchived}
+          onShowArchivedChange={thread.setShowArchived}
+          onArchiveProject={thread.setProjectArchived}
+          onDeleteProject={thread.deleteProject}
         />
         <MainThread
           project={thread.activeProject}
@@ -49,6 +54,8 @@ export function ResearchWorkbench() {
           collapsed={thread.artifactCollapsed}
           onCollapsedChange={thread.setArtifactCollapsed}
           onSelectArtifact={thread.setActiveArtifactId}
+          widthMode={thread.artifactWidthMode}
+          onWidthModeChange={thread.setArtifactWidthMode}
         />
       </div>
     </main>

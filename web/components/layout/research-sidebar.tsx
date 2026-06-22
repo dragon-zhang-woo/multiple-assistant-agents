@@ -1,14 +1,17 @@
 "use client";
 
 import {
+  Archive,
   BookOpen,
   Clock3,
   FileText,
   Moon,
   Plus,
+  RotateCcw,
   Search,
   SlidersHorizontal,
-  Sun
+  Sun,
+  Trash2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -35,6 +38,11 @@ interface ResearchSidebarProps {
   onCreateThread: () => void;
   searchQuery: string;
   onSearchQueryChange: (query: string) => void;
+  historyLoaded: boolean;
+  showArchived: boolean;
+  onShowArchivedChange: (show: boolean) => void;
+  onArchiveProject: (projectId: string, archived: boolean) => void;
+  onDeleteProject: (projectId: string) => void;
 }
 
 export function ResearchSidebar({
@@ -50,12 +58,17 @@ export function ResearchSidebar({
   onToggleTheme,
   onCreateThread,
   searchQuery,
-  onSearchQueryChange
+  onSearchQueryChange,
+  historyLoaded,
+  showArchived,
+  onShowArchivedChange,
+  onArchiveProject,
+  onDeleteProject
 }: ResearchSidebarProps) {
   const selectedProvider = providers.find((provider) => provider.id === settings.provider);
 
   return (
-    <aside className="hidden h-full w-[260px] shrink-0 border-r border-border bg-background/70 lg:flex lg:flex-col">
+    <aside className="hidden h-full w-[260px] shrink-0 border-r border-border/80 bg-background/80 lg:flex lg:flex-col">
       <div className="flex h-14 items-center justify-between px-4">
         <div>
           <div className="text-sm font-semibold">Research Desk</div>
@@ -99,37 +112,74 @@ export function ResearchSidebar({
       </div>
       <Separator />
       <div className="flex-1 overflow-y-auto px-2 py-3 quiet-scrollbar">
-        <div className="mb-2 px-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-          Projects
+        <div className="mb-2 flex items-center justify-between px-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+          <span>Threads</span>
+          <button
+            className={cn(
+              "rounded px-1.5 py-0.5 tracking-normal transition-colors hover:bg-accent hover:text-foreground",
+              showArchived && "bg-accent text-foreground"
+            )}
+            onClick={() => onShowArchivedChange(!showArchived)}
+          >
+            {showArchived ? "Archived" : projects.length}
+          </button>
         </div>
         <div className="space-y-1">
           {projects.map((project) => (
-            <button
+            <div
               key={project.id}
+              role="button"
+              tabIndex={0}
               className={cn(
-                "group w-full rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent",
-                project.id === activeProjectId && "bg-accent text-foreground"
+                "group w-full cursor-pointer rounded-md px-2.5 py-2.5 text-left outline-none transition-colors hover:bg-accent/70 focus-visible:bg-accent/70",
+                project.id === activeProjectId && "bg-accent/80 text-foreground"
               )}
               onClick={() => onSelectProject(project.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onSelectProject(project.id);
+                }
+              }}
             >
               <div className="flex items-start gap-2">
-                <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{project.name}</div>
-                  <div className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                    {project.description}
+                <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-start gap-2">
+                    <div className="min-w-0 flex-1 truncate text-sm font-medium">
+                      {project.name}
+                    </div>
+                    {project.runName && (
+                      <ThreadActions
+                        project={project}
+                        onArchiveProject={onArchiveProject}
+                        onDeleteProject={onDeleteProject}
+                      />
+                    )}
                   </div>
-                  <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                    {typeof project.paperCount === "number" && (
+                      <span>{project.paperCount} papers</span>
+                    )}
+                    {typeof project.supportingCount === "number" && (
+                      <span>+{project.supportingCount} support</span>
+                    )}
+                    {project.provider && <span className="truncate">· {project.provider}</span>}
+                  </div>
+                  <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground/90">
                     <Clock3 className="h-3 w-3" />
                     {project.updatedAt}
+                    {project.status === "archived" && <span>· archived</span>}
                   </div>
                 </div>
               </div>
-            </button>
+            </div>
           ))}
           {projects.length === 0 && (
             <div className="rounded-md border border-border bg-paper/45 px-3 py-4 text-xs leading-5 text-muted-foreground">
-              No matching threads.
+              {historyLoaded
+                ? "No matching threads."
+                : "Loading local threads..."}
             </div>
           )}
         </div>
@@ -152,6 +202,52 @@ export function ResearchSidebar({
         </button>
       </div>
     </aside>
+  );
+}
+
+function ThreadActions({
+  project,
+  onArchiveProject,
+  onDeleteProject
+}: {
+  project: ResearchProject;
+  onArchiveProject: (projectId: string, archived: boolean) => void;
+  onDeleteProject: (projectId: string) => void;
+}) {
+  const archived = project.status === "archived";
+  return (
+    <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+      <button
+        type="button"
+        className="rounded p-1 text-muted-foreground hover:bg-background/80 hover:text-foreground"
+        title={archived ? "取消归档" : "归档"}
+        aria-label={archived ? "取消归档" : "归档"}
+        onClick={(event) => {
+          event.stopPropagation();
+          onArchiveProject(project.id, !archived);
+        }}
+      >
+        {archived ? (
+          <RotateCcw className="h-3.5 w-3.5" />
+        ) : (
+          <Archive className="h-3.5 w-3.5" />
+        )}
+      </button>
+      <button
+        type="button"
+        className="rounded p-1 text-muted-foreground hover:bg-background/80 hover:text-foreground"
+        title="删除"
+        aria-label="删除"
+        onClick={(event) => {
+          event.stopPropagation();
+          if (window.confirm(`删除「${project.name}」的本地运行记录？此操作不可撤销。`)) {
+            onDeleteProject(project.id);
+          }
+        }}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </span>
   );
 }
 

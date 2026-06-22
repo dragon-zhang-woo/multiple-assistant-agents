@@ -22,7 +22,7 @@ export function ArtifactVersionPicker({
   );
 
   return (
-    <div className="mb-4 rounded-md border border-border bg-paper p-3">
+    <div className="mb-4 rounded-md border border-border/80 bg-paper p-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="truncate text-sm font-medium">{artifact.title}</div>

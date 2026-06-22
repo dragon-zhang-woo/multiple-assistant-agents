@@ -17,6 +17,7 @@ web/out/
 web/.npm-cache/
 web/.uploads/
 web/.runs/
+web/.thread-state.json
 web/.env.local
 web/tsconfig.tsbuildinfo
 web/node_modules_stale_*/

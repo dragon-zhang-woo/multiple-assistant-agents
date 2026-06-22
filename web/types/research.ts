@@ -70,8 +70,13 @@ export interface ThreadMessage {
 
 export interface ResearchProject {
   id: string;
+  runName?: string;
   name: string;
   updatedAt: string;
+  createdAt?: string;
+  provider?: string;
+  paperCount?: number;
+  supportingCount?: number;
   description: string;
   status: "active" | "draft" | "archived";
 }
