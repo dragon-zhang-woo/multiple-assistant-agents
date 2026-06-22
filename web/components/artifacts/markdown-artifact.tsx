@@ -1,3 +1,4 @@
+import { HorizontalScrollFrame } from "@/components/artifacts/horizontal-scroll-frame";
 import { cn } from "@/lib/utils";
 
 interface MarkdownArtifactProps {
@@ -66,7 +67,7 @@ export function MarkdownArtifact({ content }: MarkdownArtifactProps) {
 function MarkdownTable({ rows }: { rows: string[][] }) {
   const [header, ...body] = rows;
   return (
-    <div className="my-3 overflow-x-auto rounded-md border border-border/80 quiet-scrollbar">
+    <HorizontalScrollFrame className="my-3 rounded-md border border-border/80">
       <table className="min-w-[720px] border-collapse text-left text-xs">
         {header && (
           <thead className="bg-background">
@@ -91,7 +92,7 @@ function MarkdownTable({ rows }: { rows: string[][] }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </HorizontalScrollFrame>
   );
 }
 

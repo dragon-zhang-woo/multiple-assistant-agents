@@ -5,7 +5,6 @@ import { useState } from "react";
 import { ArtifactRenderer } from "@/components/artifacts/artifact-renderer";
 import { ArtifactVersionPicker } from "@/components/artifacts/artifact-version-picker";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { Artifact } from "@/types/research";
 
@@ -158,8 +157,8 @@ function VersionedArtifact({
     artifact.versions[0];
 
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div className="p-4">
+    <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden quiet-scrollbar">
+      <div className="p-4 pb-8">
         <ArtifactVersionPicker
           artifact={artifact}
           activeVersionId={version.id}
@@ -167,6 +166,6 @@ function VersionedArtifact({
         />
         <ArtifactRenderer artifact={artifact} version={version} />
       </div>
-    </ScrollArea>
+    </div>
   );
 }

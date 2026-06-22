@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { HorizontalScrollFrame } from "@/components/artifacts/horizontal-scroll-frame";
 import type { LiteratureRow } from "@/types/research";
 
 interface LiteratureMatrixProps {
@@ -7,7 +8,7 @@ interface LiteratureMatrixProps {
 
 export function LiteratureMatrix({ rows }: LiteratureMatrixProps) {
   return (
-    <div className="overflow-x-auto rounded-md border border-border/80 bg-paper quiet-scrollbar">
+    <HorizontalScrollFrame className="rounded-md border border-border/80 bg-paper">
       <table className="min-w-[760px] border-collapse text-left text-xs">
         <thead className="bg-muted text-muted-foreground">
           <tr>
@@ -58,6 +59,6 @@ export function LiteratureMatrix({ rows }: LiteratureMatrixProps) {
           )}
         </tbody>
       </table>
-    </div>
+    </HorizontalScrollFrame>
   );
 }
